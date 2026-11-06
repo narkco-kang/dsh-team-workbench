@@ -1,7 +1,11 @@
 # dsh-team-workbench · 智能体团队工作台
 
-一个 **DSH Desktop 原生工作台**：把具名智能体团队、角色库与本机共享技能库放进同一个面板，
-由 Desktop 左侧的工作台入口进出。当前版本 **1.7.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成**全窗口聊天应用**，
+铺满 DSH 窗口（连左侧导航区域一起覆盖），右上角「收起」可缩成右下角胶囊。当前版本 **2.0.0**，
+在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+
+> 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
+> 改为挂载到 `document.body` 的固定层，因此能盖住宿主导航——与 DS-Bot 的做法一致。
 
 ## 1.2.0 做了什么
 
@@ -19,6 +23,12 @@
 - **可自包含构建**：客户端源码在 src/client，build-client.mjs 只做外壳与 id 注入，
   不再依赖兄弟仓库的绝对行号。
 
+## 2.0.0：网页客户端插件
+
+- 客户端改为 `dsh.client.platform: web`，不再注册工作台；启动后把团队 App 挂到 body 的固定层，铺满窗口；
+- 右上角「收起」缩成右下角胶囊，点击恢复；
+- 服务端不变：11 个工具 / 18 条路由，团队、会话、角色库、记录检索、技能库都在这一个 App 里；
+- 可安装方式：`dsh plugin --profile web add <tgz>` 或插件市场。
 ## 1.7.0：会话记录检索
 
 - 顶部标签改为「聊天 / 团队 / 记录 / 角色库 / 技能库」，聊天仍是默认页；
@@ -142,7 +152,7 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 | 层次 | 覆盖情况 |
 | --- | --- |
-| 客户端注册与渲染 | `smoke-client.mjs`（结构 45 项）+ `render-client.mjs`（真实 React SSR 16 项） |
+| 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 16 项） |
 | 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 17 路由、释放后登记表清空） |
 | 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
 | 会话功能 | `smoke-chat.mjs`（20 项：私聊连续追问、群聊 @、Auto 挑人、接力层数、工具调用、聊天记录检索） |

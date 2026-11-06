@@ -93,15 +93,17 @@ check('bundle 被加载', captured !== null && captured.id === 'dsh-team-workben
 let registry = null
 const loaded = captured.factory((name) => {
   if (name === 'react') return React
+  if (name === 'react-dom') return { render: () => {}, unmountComponentAtNode: () => {} }
   throw new Error('未预期的 require：' + name)
 })
 const ctx = {
   effect: (fn) => { fn(); return fn },
-  get: () => ({ register: (descriptor, Component) => { registry = { descriptor, Component }; return () => {} } }),
+  get: () => undefined,
   logger: { info: () => {} }
 }
 loaded.apply(ctx)
-check('拿到了业务组件', registry !== null && typeof registry.Component === 'function')
+const Panel = loaded.__panel
+check('拿到了业务组件（__panel）', typeof Panel === 'function')
 
 // —— 渲染：两个标签各来一次 ——
 function renderWith(tab) {
@@ -111,7 +113,7 @@ function renderWith(tab) {
   console.error = (...args) => { errors.push(String(args[0])) }
   let html = ''
   try {
-    html = renderToString(React.createElement(registry.Component, { entry: registry.descriptor }))
+    html = renderToString(React.createElement(Panel, {}))
   } catch (error) {
     errors.push('render 抛错：' + (error && error.stack ? error.stack.split('\n').slice(0, 3).join(' | ') : String(error)))
   } finally {

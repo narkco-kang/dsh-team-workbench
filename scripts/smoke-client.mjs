@@ -34,7 +34,7 @@ const win = {
   sessionStorage: { getItem: () => null, setItem: () => {} }
 }
 globalThis.window = win
-globalThis.document = { getElementById: () => null, createElement: () => ({ style: {}, dataset: {}, appendChild() {}, remove() {} }), head: { appendChild() {} } }
+globalThis.document = { getElementById: () => null, createElement: () => ({ style: {}, dataset: {}, appendChild() {}, remove() {} }), head: { appendChild() {} }, body: { appendChild() {} } }
 
 new Function('window', src)(win)
 check('模块加载器被调用一次', captured !== null)
@@ -45,6 +45,7 @@ const loaded = captured.factory((name) => {
     const React = { createElement: () => null, useState: (v) => [typeof v === 'function' ? v() : v, () => {}], useEffect: () => {}, useCallback: (f) => f }
     return React
   }
+  if (name === 'react-dom') return { render: () => {}, unmountComponentAtNode: () => {} }
   throw new Error('未预期的 require：' + name)
 })
 check('导出 apply', typeof loaded.apply === 'function')
@@ -55,23 +56,17 @@ const effects = []
 const registered = []
 const ctx = {
   effect: (fn, label) => { effects.push({ fn, label }); return fn },
-  get: (name) => (name === 'desktopWorkbenches' ? { register: (descriptor, Component) => { registered.push({ descriptor, Component }); return () => {} } } : undefined),
+  get: () => undefined,
   logger: { info: () => {} }
 }
 loaded.apply(ctx)
 
-check('apply 注册了两个 ctx.effect（样式 + 工作台）', effects.length === 2, String(effects.length))
+check('apply 注册了两个 ctx.effect（样式 + 挂载）', effects.length === 2, String(effects.length))
 for (const e of effects) if (typeof e.fn === 'function') e.fn()
-check('向 desktopWorkbenches.register 提交了 1 个面板', registered.length === 1, String(registered.length))
-
-const d = registered[0] && registered[0].descriptor
-check('描述符有 title', d && typeof d.title === 'string' && d.title.length > 0, d && d.title)
-check('描述符有 repository（GitHub URL）', d && /^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(d.repository || ''), d && d.repository)
-check('描述符有 description', d && typeof d.description === 'string' && d.description.length > 0)
-const fullPage = d !== undefined && d !== null && d.customFrame === true
-check('整页模式（customFrame）或右侧分栏', fullPage || (d && d.layout && d.layout.businessSide === 'right'), fullPage ? 'customFrame' : (d && JSON.stringify(d.layout)))
-check('分栏宽度在 0.25–0.7（整页模式不适用）', fullPage || (d && d.layout && d.layout.businessWidth >= 0.25 && d.layout.businessWidth <= 0.7), fullPage ? '整页' : (d && String(d.layout.businessWidth)))
-check('业务组件是个函数', registered[0] && typeof registered[0].Component === 'function')
+check('不再依赖工作台注册 API', !src.includes('desktopWorkbenches') && !src.includes('businessWidth'))
+check('客户端平台为 web', pkg.dsh?.client?.platform === 'web' && pkg.dsh.client.inject === undefined, JSON.stringify(pkg.dsh?.client))
+check('挂了全窗口 App', src.includes('dsh-team-app-host') && src.includes('dta-shell'))
+check('导出面板供 SSR（__panel）', typeof loaded.__panel === 'function')
 
 // —— 3. 源码里不应再有浮动载体 ——
 const forbidden = ['dsh-manager-dock', '__DSH_DOCK__', 'ats-float-panel', 'ats-float-fab', 'managerDock', 'betterSidebar', 'registerTab', 'openTab', 'closeTab', 'ensureDock', 'FloatingHost']
