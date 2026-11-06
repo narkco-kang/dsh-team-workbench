@@ -8,7 +8,7 @@
  *   3. 从 bundles / dependencies 摘掉 dsh-agent-team-studio 与 dsh-skill-manager，
  *      并关掉 cordis.patch.yml 里它们的手动挂载行。
  *
- * 为什么必须摘掉：本包提供**同名**的 8 个模型工具
+ * 为什么必须摘掉：本包提供**同名**的 9 个模型工具
  * （agent_team_roster / agent_team_dispatch / agent_team_task +
  *   skill_manager_list / skill_manager_read / skill_manager_save /
  *   skill_manager_delete / skill_manager_deploy），同时挂载会工具重名冲突；

@@ -122,14 +122,18 @@ function renderWith(tab) {
 
 const team = renderWith('team')
 check('团队标签渲染成功（无抛错）', !team.errors.some((e) => e.startsWith('render 抛错')), team.errors.find((e) => e.startsWith('render 抛错')))
-check('团队标签输出含外壳与标签按钮', team.html.includes('tw-root') && team.html.includes('智能体团队') && team.html.includes('共享技能库'))
+check('团队标签输出含外壳与三个标签按钮', team.html.includes('tw-root') && team.html.includes('智能体团队') && team.html.includes('角色库') && team.html.includes('技能库'))
 check('团队标签渲染出团队面板根节点', team.html.includes('ats-root'), team.html.includes('ats-root') ? undefined : team.html.slice(0, 200))
-check('团队标签渲染出搜索/新建等真实控件', team.html.includes('搜索') || team.html.includes('新建'))
+check('团队标签渲染出搜索/新建/预设等真实控件', team.html.includes('搜索') && team.html.includes('新建') && team.html.includes('项目部预设'))
+
+const roles = renderWith('roles')
+check('角色库标签渲染成功（无抛错）', !roles.errors.some((e) => e.startsWith('render 抛错')), roles.errors.find((e) => e.startsWith('render 抛错')))
+check('角色库标签渲染出分类与搜索', roles.html.includes('角色库') && roles.html.includes('正在读取角色库'))
 
 const skills = renderWith('skills')
 check('技能库标签渲染成功（无抛错）', !skills.errors.some((e) => e.startsWith('render 抛错')), skills.errors.find((e) => e.startsWith('render 抛错')))
 check('技能库标签把团队面板整体卸载（不共存）', !skills.html.includes('ats-root'))
-check('技能库标签渲染出“加载中”占位', skills.html.includes('加载中') && skills.html.includes('共享技能库'), skills.html.slice(0, 160))
+check('技能库标签渲染出“加载中”占位', skills.html.includes('加载中') && skills.html.includes('技能库'), skills.html.slice(0, 160))
 
 // 业务区容器的宽度自适应与窄窗口表现无法在 SSR 阶段验证（需要真实排版），
 // 按《工作台开发规范》第 8 节列入安装后的待验证项，见 README 的交付清单。

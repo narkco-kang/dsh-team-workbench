@@ -1,7 +1,7 @@
 {
   "name": "dsh-team-workbench",
-  "version": "1.1.0",
-  "description": "智能体团队 · 技能管理工作台：17 名具名智能体（每人专属表情与配色、一组可回退模型路由），以及本机共享技能库的增删改查与派发；面向 DSH Desktop 原生工作台面板，兼容 DSH 0.2.2。",
+  "version": "1.2.0",
+  "description": "智能体团队 · 技能管理工作台：可分组、可换头像的具名智能体，每人一组可回退模型路由；内置 agency-agents-zh 的 313 个角色可按需加入，默认项目部角色配置，并管理本机共享技能库。面向 DSH Desktop 原生工作台面板，0.13.2 实测。",
   "type": "module",
   "main": "./dsh/index.js",
   "exports": {
@@ -24,7 +24,11 @@
   "files": [
     "dsh",
     "lib",
+    "src",
+    "data",
+    "presets",
     "scripts",
+    "NOTICE-agency-agents-zh.md",
     "market",
     "cordis.patch.yml",
     "LICENSE",

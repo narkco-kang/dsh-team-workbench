@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## 1.2.0 — 2026-11-07
+
+### 面向「可选的智能体团队」
+- **每人专属表情 + 头像**：默认 emoji 叠配色渐变底（17 人即 17 种身份），编辑器可上传照片
+  （居中裁剪 160×160，webp ≤150 KB，按 sha256 存 `$DSH_HOME/team-workbench/avatars/`）。
+- **角色库**：内置 agency-agents-zh 313 个角色 / 22 个部门（MIT，原样收录）；面板可搜索、按部门
+  筛选、预览正文、一键加入指定分组；新增 `agent_team_roles` 工具供模型挑选角色。
+  角色正文按 id 懒加载，team.json 只存 `roleRef`。
+- **分组模式**：新增分组增删改与折叠，「分组 / 平铺」两种视图；成员可换组，未分组单独成节。
+- **「项目部」预设**：6 组 15 人（决策 / 设计 / 研发 / 测试 / 运营 / 交付），支持追加与替换；
+  `agent_team_task` 的审核/复核关卡在固定名字缺失时按职责关键词兜底。
+- **面板重构**：三标签（团队 / 角色库 / 技能库）、搜索、预设、响应式卡片网格；业务区宽度 0.52。
+
+### 工程
+- store v3（groups / preset / member.groupId / avatar / roleRef），v2→v3 写回前自动备份 `team.json.bak-v2`。
+- 客户端源码迁入 `src/client`，`build-client.mjs` 只做外壳与 id 注入，不再按行号抽取兄弟仓库。
+- 新增路由：`/roles`（GET 检索 / POST 导入）、`/roles/body`、`/preset`、`/avatar`。
+- 新增冒烟：`smoke-v12.mjs`（预设 / 角色导入 / 分组 / 检索），SSR 覆盖角色库标签。
+- 适配 DSH Desktop 0.13.2（macOS arm64 实测）；市场投稿改为 awesome-dsh-workbench 收录 PR。
+
+### 兼容性
+- 服务端 9 工具 / 13 路由；释放后登记表清空，重复挂载无累积。
+- 1.1.0 及更早版本打开 v3 会丢掉 groups/avatar/roleRef，请勿在旧版本继续编辑保存。
+
+## 1.1.0 — 2026-11-06
 ## 1.1.0 — 2026-11-06
 
 ### 面向「智能体团队」的可见升级

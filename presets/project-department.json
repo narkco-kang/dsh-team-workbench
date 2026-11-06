@@ -1,0 +1,211 @@
+{
+  "id": "project-department",
+  "version": "1.0.0",
+  "name": "项目部",
+  "description": "按成立一个项目部所需的最小完整角色搭班：决策、设计、研发、测试、运营、交付六组，15 人；路由留空时继承主智能体。",
+  "groups": [
+    {
+      "id": "g-lead",
+      "name": "决策",
+      "color": "#2563eb",
+      "order": 0
+    },
+    {
+      "id": "g-design",
+      "name": "设计",
+      "color": "#db2777",
+      "order": 1
+    },
+    {
+      "id": "g-dev",
+      "name": "研发",
+      "color": "#ea580c",
+      "order": 2
+    },
+    {
+      "id": "g-qa",
+      "name": "测试",
+      "color": "#16a34a",
+      "order": 3
+    },
+    {
+      "id": "g-ops",
+      "name": "运营",
+      "color": "#ca8a04",
+      "order": 4
+    },
+    {
+      "id": "g-deliver",
+      "name": "交付",
+      "color": "#7c3aed",
+      "order": 5
+    }
+  ],
+  "members": [
+    {
+      "name": "项目总控",
+      "role": "项目统筹与交付节奏",
+      "emoji": "👔",
+      "color": "#2563eb",
+      "groupId": "g-lead",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "project-management/project-manager-senior"
+      }
+    },
+    {
+      "name": "产品经理",
+      "role": "需求澄清与优先级",
+      "emoji": "📦",
+      "color": "#2563eb",
+      "groupId": "g-lead",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "product/product-manager"
+      }
+    },
+    {
+      "name": "架构师",
+      "role": "技术选型与架构决策",
+      "emoji": "🏛️",
+      "color": "#2563eb",
+      "groupId": "g-lead",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "engineering/engineering-software-architect"
+      }
+    },
+    {
+      "name": "UI 设计师",
+      "role": "界面与视觉设计",
+      "emoji": "🎨",
+      "color": "#db2777",
+      "groupId": "g-design",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "design/design-ui-designer"
+      }
+    },
+    {
+      "name": "UX 架构师",
+      "role": "交互流程与可用性",
+      "emoji": "🏗️",
+      "color": "#db2777",
+      "groupId": "g-design",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "design/design-ux-architect"
+      }
+    },
+    {
+      "name": "前端开发者",
+      "role": "前端实现与联调",
+      "emoji": "💻",
+      "color": "#ea580c",
+      "groupId": "g-dev",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "engineering/engineering-frontend-developer"
+      }
+    },
+    {
+      "name": "后端架构师",
+      "role": "服务端与接口实现",
+      "emoji": "⚙️",
+      "color": "#ea580c",
+      "groupId": "g-dev",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "engineering/engineering-backend-architect"
+      }
+    },
+    {
+      "name": "数据工程师",
+      "role": "数据管道与指标口径",
+      "emoji": "📊",
+      "color": "#ea580c",
+      "groupId": "g-dev",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "engineering/engineering-data-engineer"
+      }
+    },
+    {
+      "name": "测试自动化工程师",
+      "role": "自动化测试与回归",
+      "emoji": "🎭",
+      "color": "#16a34a",
+      "groupId": "g-qa",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "testing/testing-test-automation-engineer"
+      }
+    },
+    {
+      "name": "API 测试员",
+      "role": "接口契约与边界验证",
+      "emoji": "🔗",
+      "color": "#16a34a",
+      "groupId": "g-qa",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "testing/testing-api-tester"
+      }
+    },
+    {
+      "name": "增长黑客",
+      "role": "获客实验与转化",
+      "emoji": "🚀",
+      "color": "#ca8a04",
+      "groupId": "g-ops",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "marketing/marketing-growth-hacker"
+      }
+    },
+    {
+      "name": "运营经理",
+      "role": "日常运营与活动落地",
+      "emoji": "⚙️",
+      "color": "#ca8a04",
+      "groupId": "g-ops",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "specialized/operations-manager"
+      }
+    },
+    {
+      "name": "内容运营",
+      "role": "内容策划与渠道分发",
+      "emoji": "💬",
+      "color": "#ca8a04",
+      "groupId": "g-ops",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "marketing/marketing-wechat-operator"
+      }
+    },
+    {
+      "name": "质量审核员",
+      "role": "质量审核与验收",
+      "emoji": "📈",
+      "color": "#7c3aed",
+      "groupId": "g-deliver",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "testing/testing-test-results-analyzer"
+      }
+    },
+    {
+      "name": "交付复核员",
+      "role": "交付复核与风险把关",
+      "emoji": "🐑",
+      "color": "#7c3aed",
+      "groupId": "g-deliver",
+      "roleRef": {
+        "library": "agency-agents-zh",
+        "id": "project-management/project-management-project-shepherd"
+      }
+    }
+  ]
+}

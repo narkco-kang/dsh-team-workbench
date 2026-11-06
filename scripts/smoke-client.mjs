@@ -95,17 +95,17 @@ check('dsh/team.js 的 PLUGIN_VERSION 与 package.json version 一致',
   pluginVersion !== null && pluginVersion[1] === pkg.version,
   pluginVersion ? pluginVersion[1] + ' vs ' + pkg.version : '未找到 PLUGIN_VERSION')
 
-// 文档口径：本包与旧插件同名的模型工具共 8 个（团队 3 + 技能库 5）。
+// 文档口径：本包模型工具共 9 个（团队 4 + 技能库 5）。
 // 这个数字容易被漏写成 7，因此在测试里钉住（审核流水线抓到过一次）。
-const TEAM_TOOLS = ['agent_team_roster', 'agent_team_dispatch', 'agent_team_task']
+const TEAM_TOOLS = ['agent_team_roster', 'agent_team_dispatch', 'agent_team_task', 'agent_team_roles']
 const SKILL_TOOLS = ['skill_manager_list', 'skill_manager_read', 'skill_manager_save', 'skill_manager_delete', 'skill_manager_deploy']
 const serverTools = [...TEAM_TOOLS, ...SKILL_TOOLS].filter((t) => readFileSync(join(root, 'dsh', 'team.js'), 'utf8').includes("name: '" + t + "'") || readFileSync(join(root, 'dsh', 'skills.js'), 'utf8').includes("name: '" + t + "'"))
-check('服务端注册的工具数与文档一致（8 个）', serverTools.length === 8, String(serverTools.length))
+check('服务端注册的工具数与文档一致（9 个）', serverTools.length === 9, String(serverTools.length))
 for (const doc of ['README.md', 'dsh/index.js', 'dsh/team.js', 'scripts/migrate-profile.mjs']) {
   const text = readFileSync(join(root, doc), 'utf8')
   check(doc + ' 不再出现「7 个」的旧口径', !text.includes('7 个'))
   check(doc + ' 列出了 agent_team_task', text.includes('agent_team_task'))
-  if (doc !== 'dsh/team.js') check(doc + ' 的工具数口径是 8 个', text.includes('8 个'))
+  if (doc !== 'dsh/team.js') check(doc + ' 的工具数口径是 9 个', text.includes('9 个'))
 }
 check('技能库路由前缀已切到本工作台', src.includes('"/api/team-workbench/skills"'))
 check('团队路由前缀已切到本工作台', src.includes('"/api/team-workbench/state"') && src.includes('"/api/team-workbench/members"') && src.includes('"/api/team-workbench/probe"') && src.includes('"/api/team-workbench/dispatch"'))

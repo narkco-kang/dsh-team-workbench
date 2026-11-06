@@ -17,9 +17,20 @@
  * @module dsh-team-workbench/dsh/team
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import {
+  colorOfName,
+  decodeImageDataUrl,
+  listPresets,
+  loadPreset,
+  loadRoleBody,
+  loadRoleIndex,
+  readAvatar,
+  saveAvatar,
+  searchRoles
+} from './library.js'
 
 /** Cordis 插件名。 */
 export const TEAM_NAME = 'dsh-team-workbench/team'
@@ -45,7 +56,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '1.1.0'
+const PLUGIN_VERSION = '1.2.0'
 
 /** 路由前缀。 */
 const ROUTE_BASE = '/api/team-workbench'
@@ -53,16 +64,21 @@ const STATE_ROUTE = ROUTE_BASE + '/state'
 const MEMBERS_ROUTE = ROUTE_BASE + '/members'
 const PROBE_ROUTE = ROUTE_BASE + '/probe'
 const DISPATCH_ROUTE = ROUTE_BASE + '/dispatch'
+const GROUPS_ROUTE = ROUTE_BASE + '/groups'
+const ROLES_ROUTE = ROUTE_BASE + '/roles'
+const ROLE_BODY_ROUTE = ROUTE_BASE + '/roles/body'
+const PRESET_ROUTE = ROUTE_BASE + '/preset'
+const AVATAR_ROUTE = ROUTE_BASE + '/avatar'
 
 /** 推理强度选项（与 dsh-llm 的 ReasoningEffortId 对齐）。 */
 const EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'max']
 
 /** 规模上限。 */
-const MAX_MEMBERS = 48
+const MAX_MEMBERS = 64
 const MAX_ROUTES = 8
 
-/** 配置文档版本。 */
-const STORE_VERSION = 2
+/** 配置文档版本（v3：分组 + 头像 + 角色库引用）。 */
+const STORE_VERSION = 3
 
 /** 解析 harness 主目录：优先 DSH_HOME，其次 ~/.dsh。 */
 function harnessHome() {
@@ -99,6 +115,34 @@ function normalizeRoute(raw, index) {
   }
 }
 
+/** 规范化一个分组。 */
+function normalizeGroup(raw, index) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  return {
+    id: text(source.id) || makeId('g'),
+    name: text(source.name) || '分组 ' + String(index + 1),
+    color: /^#[0-9a-fA-F]{6}$/.test(text(source.color)) ? text(source.color).toLowerCase() : '',
+    order: Number.isFinite(source.order) ? Number(source.order) : index,
+    collapsed: source.collapsed === true
+  }
+}
+
+/** 规范化头像：emoji（默认，前端生成色底）或已上传图片。 */
+function normalizeAvatar(raw) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  const kind = source.kind === 'image' ? 'image' : 'emoji'
+  return { kind, imageId: kind === 'image' ? text(source.imageId) : '' }
+}
+
+/** 规范化角色库引用；空 id 表示没有引用。 */
+function normalizeRoleRef(raw) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  const id = text(source.id)
+  return id.length === 0
+    ? { library: '', id: '', version: '' }
+    : { library: text(source.library) || 'agency-agents-zh', id, version: text(source.version) }
+}
+
 /** 规范化一个成员；兼容 v1 的单模型字段（provider/model/reasoningEffort）。 */
 function normalizeMember(raw, index) {
   const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
@@ -126,6 +170,12 @@ function normalizeMember(raw, index) {
     emoji: text(source.emoji) || '🤖',
     // 卡片配色：空串 = 自动（客户端按 id 稳定分配），否则 #rrggbb。
     color: /^#[0-9a-fA-F]{6}$/.test(text(source.color)) ? text(source.color).toLowerCase() : '',
+    // 分组 id；空串落「未分组」。
+    groupId: text(source.groupId),
+    // 头像：默认 emoji + 配色底，可选上传图片（imageId 指向本机头像文件）。
+    avatar: normalizeAvatar(source.avatar),
+    // 角色库引用：从 agency-agents-zh 导入的角色，派发时按 id 取正文当 persona。
+    roleRef: normalizeRoleRef(source.roleRef),
     instructions: typeof source.instructions === 'string' ? source.instructions : '',
     enabled: source.enabled === false ? false : true,
     createdAt: text(source.createdAt) || new Date().toISOString(),
@@ -136,28 +186,46 @@ function normalizeMember(raw, index) {
 
 /** 空团队。 */
 function emptyStore() {
-  return { version: STORE_VERSION, updatedAt: '', members: [] }
+  return { version: STORE_VERSION, updatedAt: '', preset: '', groups: [], members: [] }
 }
 
 /** 读取团队配置；缺失或损坏时返回空团队。 */
 async function loadStore() {
   try {
     const parsed = JSON.parse(await readFile(storePath(), 'utf8'))
+    const groups = Array.isArray(parsed?.groups) ? parsed.groups.map(normalizeGroup) : []
+    const known = new Set(groups.map((group) => group.id))
     const members = Array.isArray(parsed?.members) ? parsed.members.map(normalizeMember) : []
-    return { version: STORE_VERSION, updatedAt: text(parsed?.updatedAt), members }
+    for (const member of members) {
+      if (member.groupId.length > 0 && !known.has(member.groupId)) member.groupId = ''
+    }
+    return {
+      version: STORE_VERSION,
+      updatedAt: text(parsed?.updatedAt),
+      preset: text(parsed?.preset),
+      groups,
+      members
+    }
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn('[team-workbench] 读取团队配置失败：' + String(error))
     return emptyStore()
   }
 }
 
-/** 原子写回。 */
+/** 原子写回；从旧版本升级时先留一份备份。 */
 async function saveStore(store) {
   const target = storePath()
   await mkdir(dirname(target), { recursive: true })
+  try {
+    const previous = JSON.parse(await readFile(target, 'utf8'))
+    const version = Number(previous?.version) || 1
+    if (version < STORE_VERSION) await copyFile(target, target + '.bak-v' + String(version))
+  } catch { /* 没有旧文件：无需备份 */ }
   const payload = JSON.stringify({
     version: STORE_VERSION,
     updatedAt: new Date().toISOString(),
+    preset: store.preset,
+    groups: store.groups,
     members: store.members
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
@@ -394,11 +462,25 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   }
 }
 
+/** 成员没有内联 instructions 时，按 roleRef 从角色库取正文。 */
+async function withRoleInstructions(member) {
+  if (member.instructions.trim().length > 0 || member.roleRef.id.length === 0) return member
+  try {
+    const body = await loadRoleBody(member.roleRef.id)
+    if (body.trim().length === 0) return member
+    return { ...member, instructions: body }
+  } catch {
+    return member
+  }
+}
+
 /**
  * 在成员绑定的模型上运行一次委派，失败自动回退到下一条已启用路由。
  * @returns 最终结果 + 每条路由的尝试记录。
  */
-async function dispatchToMember(ctx, parent, member, task, signal) {
+async function dispatchToMember(ctx, parent, rawMember, task, signal) {
+  // 从角色库导入的成员可能只存了 roleRef（正文不落 team.json），派发前补上。
+  const member = await withRoleInstructions(rawMember)
   const subagents = ctx.get('subagents')
   if (subagents === undefined || subagents === null) throw new Error('subagents 服务不可用，无法派发任务')
   if (resolveProviderName(ctx) === undefined) throw new Error('没有已注册的子智能体 provider')
@@ -482,11 +564,48 @@ const ROUTE_SCHEMA = {
   }
 }
 
+/** 头像的 JSON Schema 片段。 */
+const AVATAR_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['kind', 'imageId'],
+  properties: {
+    kind: { type: 'string', description: 'emoji（默认，前端按配色生成底色）或 image（本机已上传头像）。' },
+    imageId: { type: 'string', description: '图片头像的本机文件 id；emoji 头像为空串。' }
+  }
+}
+
+/** 角色库引用的 JSON Schema 片段。 */
+const ROLE_REF_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['library', 'id', 'version'],
+  properties: {
+    library: { type: 'string', description: '角色库标识；空串表示没有引用。' },
+    id: { type: 'string', description: 'agency-agents-zh 的角色 id，例如 engineering/engineering-frontend-developer。' },
+    version: { type: 'string' }
+  }
+}
+
+/** 分组的 JSON Schema 片段。 */
+const GROUP_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'name', 'color', 'order', 'collapsed'],
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    color: { type: 'string', description: '#rrggbb；空串表示自动配色。' },
+    order: { type: 'integer' },
+    collapsed: { type: 'boolean' }
+  }
+}
+
 /** 成员的 JSON Schema 片段。 */
 const MEMBER_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['id', 'name', 'role', 'emoji', 'color', 'instructions', 'enabled', 'createdAt', 'activeRouteId', 'routes'],
+  required: ['id', 'name', 'role', 'emoji', 'color', 'groupId', 'avatar', 'roleRef', 'instructions', 'enabled', 'createdAt', 'activeRouteId', 'routes'],
   properties: {
     id: { type: 'string' },
     name: { type: 'string' },
@@ -495,6 +614,9 @@ const MEMBER_SCHEMA = {
     // 卡片配色。必须声明：schema 是 additionalProperties:false，
     // 漏了它会让 agent_team_roster 整个工具因校验失败而不可用。
     color: { type: 'string', description: '卡片配色 #rrggbb；空串表示自动配色。' },
+    groupId: { type: 'string', description: '所属分组 id；空串表示未分组。' },
+    avatar: AVATAR_SCHEMA,
+    roleRef: ROLE_REF_SCHEMA,
     instructions: { type: 'string' },
     enabled: { type: 'boolean' },
     createdAt: { type: 'string' },
@@ -514,10 +636,11 @@ function registerTools(ctx) {
       schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['count', 'members', 'pluginVersion'],
+        required: ['count', 'members', 'groups', 'pluginVersion'],
         properties: {
           count: { type: 'integer', description: '当前团队成员数。' },
           pluginVersion: { type: 'string' },
+          groups: { type: 'array', description: '团队分组（顺序即展示顺序）。', items: GROUP_SCHEMA },
           members: { type: 'array', items: MEMBER_SCHEMA }
         }
       },
@@ -529,7 +652,7 @@ function registerTools(ctx) {
     },
     async execute() {
       const store = await loadStore()
-      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, members: store.members }
+      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, groups: store.groups, members: store.members }
     }
   }
 
@@ -740,10 +863,13 @@ function registerTools(ctx) {
 
       const store = await loadStore()
       const byName = (n) => store.members.find((entry) => entry.name === n)
-      const auditor = byName(GATE_AUDITOR)
-      const reviewer = byName(GATE_REVIEWER)
-      if (auditor === undefined) throw new Error('名册中没有「' + GATE_AUDITOR + '」，审核关卡无法执行')
-      if (reviewer === undefined) throw new Error('名册中没有「' + GATE_REVIEWER + '」，复核关卡无法执行')
+      // 先按固定名字找；找不到再按职责关键词兜底，这样「项目部」预设
+      // （质量审核员 / 交付复核员）不必为了关卡改名。
+      const byRole = (pattern) => store.members.find((entry) => entry.enabled && (pattern.test(entry.role) || pattern.test(entry.name)))
+      const auditor = byName(GATE_AUDITOR) ?? byRole(/审核/)
+      const reviewer = byName(GATE_REVIEWER) ?? byRole(/复核/)
+      if (auditor === undefined) throw new Error('名册中没有「' + GATE_AUDITOR + '」或职责含「审核」的成员，审核关卡无法执行')
+      if (reviewer === undefined) throw new Error('名册中没有「' + GATE_REVIEWER + '」或职责含「复核」的成员，复核关卡无法执行')
 
       const chain = []
       let produced = draft
@@ -891,7 +1017,65 @@ function registerTools(ctx) {
   }
   //#endregion
 
-  return [ctx.tools.register(roster), ctx.tools.register(dispatch), ctx.tools.register(gate)]
+  const roleSearch = {
+    name: 'agent_team_roles',
+    description: '角色库检索：按关键词查 agency-agents-zh 的 300+ 个预设角色（名称、部门、职责、表情）。只读，用来挑选要加入团队的角色。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['query'],
+      properties: {
+        query: { type: 'string', description: '关键词，例如「前端」「测试」「增长」；空串返回前几条。' },
+        limit: { type: 'integer', description: '返回条数 1-50，默认 12。' }
+      }
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['total', 'roles'],
+        properties: {
+          total: { type: 'integer' },
+          roles: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['id', 'name', 'category', 'emoji', 'description'],
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                category: { type: 'string' },
+                emoji: { type: 'string' },
+                description: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: '角色库匹配 ' + String(value.total) + ' 个：\n' +
+          value.roles.map((role) => role.emoji + ' ' + role.name + '（' + role.category + '）— ' + role.description).join('\n')
+      }]
+    },
+    async execute(args) {
+      const limit = Number.isSafeInteger(args?.limit) ? Math.min(50, Math.max(1, args.limit)) : 12
+      const result = await searchRoles(text(args?.query), '', 0, limit)
+      return {
+        total: result.total,
+        roles: result.roles.map((role) => ({
+          id: role.id,
+          name: role.name,
+          category: role.categoryName,
+          emoji: role.emoji,
+          description: role.description
+        }))
+      }
+    }
+  }
+
+  return [ctx.tools.register(roster), ctx.tools.register(dispatch), ctx.tools.register(gate), ctx.tools.register(roleSearch)]
 }
 
 /** 批量创建辅助：按模板追加 N 名成员。 */
@@ -918,12 +1102,118 @@ function templateOf(body) {
   return body.template !== null && typeof body.template === 'object' && !Array.isArray(body.template) ? body.template : {}
 }
 
+/** 分组的增删改。 */
+function applyGroupAction(store, body) {
+  const action = text(body.action)
+  if (action === 'group-upsert') {
+    const incoming = body.group !== null && typeof body.group === 'object' ? body.group : {}
+    const id = text(incoming.id)
+    const index = id.length > 0 ? store.groups.findIndex((group) => group.id === id) : -1
+    if (index >= 0) {
+      store.groups[index] = normalizeGroup({ ...store.groups[index], ...incoming, id: store.groups[index].id }, index)
+    } else {
+      if (store.groups.length >= 24) return '分组最多 24 个'
+      store.groups.push(normalizeGroup({ ...incoming, order: store.groups.length }, store.groups.length))
+    }
+    return null
+  }
+  if (action === 'group-delete') {
+    const id = text(body.id)
+    store.groups = store.groups.filter((group) => group.id !== id)
+    for (const member of store.members) if (member.groupId === id) member.groupId = ''
+    return null
+  }
+  if (action === 'group-reorder') {
+    const ids = Array.isArray(body.ids) ? body.ids.map(text) : []
+    const byId = new Map(store.groups.map((group) => [group.id, group]))
+    const next = []
+    for (const id of ids) {
+      const found = byId.get(id)
+      if (found === undefined) return '排序列表包含未知分组 id'
+      next.push(found)
+      byId.delete(id)
+    }
+    for (const group of byId.values()) next.push(group)
+    store.groups = next.map((group, index) => ({ ...group, order: index }))
+    return null
+  }
+  return '未知分组 action：' + action
+}
+
+/** 角色库概要：面板首屏只需要数量与分类，不拉 300+ 条索引。 */
+async function roleLibrarySummary() {
+  const index = await loadRoleIndex()
+  return { version: index.version, upstream: index.upstream, total: index.roles.length, categories: index.categories }
+}
+
+/** 从角色库导入成员：只写 roleRef，正文在派发时按需读取，避免 team.json 膨胀。 */
+async function importRoles(store, ids, groupId) {
+  const index = await loadRoleIndex()
+  const byId = new Map(index.roles.map((role) => [role.id, role]))
+  const taken = new Set(store.members.map((member) => member.name))
+  const created = []
+  for (const id of Array.isArray(ids) ? ids.map(text) : []) {
+    const role = byId.get(id)
+    if (role === undefined) continue
+    if (store.members.length >= MAX_MEMBERS) break
+    const name = uniqueName(role.name, taken)
+    taken.add(name)
+    const member = normalizeMember({
+      name,
+      role: role.description.length > 0 ? role.description.slice(0, 48) : role.categoryName,
+      emoji: role.emoji,
+      color: colorOfName(role.color),
+      groupId: text(groupId),
+      roleRef: { library: 'agency-agents-zh', id: role.id, version: index.version }
+    }, store.members.length)
+    store.members.push(member)
+    created.push(member)
+  }
+  return created
+}
+
+/** 应用预设团队；replace 会先清空当前团队与分组。 */
+async function applyPresetToStore(store, preset, mode) {
+  const replace = mode === 'replace'
+  if (replace) {
+    store.members = []
+    store.groups = []
+  }
+  const groupNameById = new Map((preset.groups || []).map((group) => [group.id, group.name]))
+  for (const group of Array.isArray(preset.groups) ? preset.groups : []) {
+    if (store.groups.some((existing) => existing.name === group.name)) continue
+    store.groups.push(normalizeGroup({ name: group.name, color: group.color, order: store.groups.length }, store.groups.length))
+  }
+  const groupIdByName = new Map(store.groups.map((group) => [group.name, group.id]))
+  const taken = new Set(store.members.map((member) => member.name))
+  let added = 0
+  for (const entry of Array.isArray(preset.members) ? preset.members : []) {
+    if (store.members.length >= MAX_MEMBERS) break
+    if (store.members.some((existing) => existing.name === entry.name)) continue
+    const groupName = groupNameById.get(entry.groupId) || ''
+    const member = normalizeMember({
+      name: uniqueName(entry.name, taken),
+      role: entry.role,
+      emoji: entry.emoji,
+      color: entry.color,
+      groupId: groupIdByName.get(groupName) || '',
+      roleRef: entry.roleRef
+    }, store.members.length)
+    taken.add(member.name)
+    store.members.push(member)
+    added += 1
+  }
+  store.preset = text(preset.id)
+  return added
+}
+
 /** 作用于单个成员模型路由列表的动作集。 */
 const ROUTE_ACTIONS = ['route-upsert', 'route-delete', 'route-activate', 'route-reorder']
 
 /** 在 store 上应用一个成员动作；返回错误字符串或 null。 */
 function applyMemberAction(store, body) {
   const action = text(body.action) || 'upsert'
+  if (action.startsWith('group-')) return applyGroupAction(store, body)
   const findIndex = (id) => store.members.findIndex((m) => m.id === text(id))
 
   if (action === 'upsert') {
@@ -1124,11 +1414,15 @@ export function apply(ctx, config) {
       pluginVersion: PLUGIN_VERSION,
       version: STORE_VERSION,
       members: store.members,
+      groups: store.groups,
+      preset: store.preset,
+      presets: await listPresets(),
+      roleLibrary: await roleLibrarySummary(),
       catalog: catalog.providers,
       catalogError: catalog.error,
       defaults: resolveDefaults(ctx),
       effortOptions: EFFORT_OPTIONS,
-      limits: { maxMembers: MAX_MEMBERS, maxRoutes: MAX_ROUTES },
+      limits: { maxMembers: MAX_MEMBERS, maxRoutes: MAX_ROUTES, maxGroups: 24 },
       storePath: storePath()
     }
   }
@@ -1211,6 +1505,107 @@ export function apply(ctx, config) {
       try {
         const result = await dispatchToMember(ctx, parent, member, task, request.signal)
         return json({ ok: true, member: { id: member.id, name: member.name }, ...result })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: ROLES_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'POST') {
+          const body = await readJson(request)
+          if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+          const store = await loadStore()
+          const created = await importRoles(store, body.ids, text(body.groupId))
+          if (created.length === 0) return json({ ok: false, error: '没有可导入的角色（id 不存在或已满员）' }, 400)
+          await saveStore(store)
+          return json({ ...(await snapshot()), created: created.map((member) => member.id) })
+        }
+        const url = new URL(request.url)
+        const index = await loadRoleIndex()
+        const result = await searchRoles(
+          url.searchParams.get('q') || '',
+          url.searchParams.get('category') || '',
+          Number(url.searchParams.get('offset') || 0),
+          Number(url.searchParams.get('limit') || 60)
+        )
+        return json({ ok: true, ...result, version: index.version, upstream: index.upstream, categories: index.categories })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: ROLE_BODY_ROUTE,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const id = new URL(request.url).searchParams.get('id') || ''
+        const body = await loadRoleBody(id)
+        return json({ ok: body.length > 0, id, body })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: PRESET_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'GET') return json({ ok: true, presets: await listPresets() })
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const preset = await loadPreset(text(body.id))
+        if (preset === null) return json({ ok: false, error: '找不到该预设' }, 404)
+        const store = await loadStore()
+        const added = await applyPresetToStore(store, preset, body.mode === 'replace' ? 'replace' : 'append')
+        await saveStore(store)
+        return json({ ...(await snapshot()), added })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: AVATAR_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'GET') {
+          const id = new URL(request.url).searchParams.get('id') || ''
+          const found = await readAvatar(harnessHome(), id)
+          if (found === null) return new Response('not found', { status: 404 })
+          return new Response(found.bytes, {
+            status: 200,
+            headers: {
+              'content-type': found.ext === 'jpg' ? 'image/jpeg' : 'image/' + found.ext,
+              'cache-control': 'public, max-age=31536000, immutable'
+            }
+          })
+        }
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const decoded = decodeImageDataUrl(body.dataUrl)
+        if (decoded === null) return json({ ok: false, error: '头像必须是 png/jpeg/webp，且不超过 400 KB' }, 400)
+        const id = await saveAvatar(harnessHome(), decoded.bytes, decoded.ext)
+        const store = await loadStore()
+        const member = store.members.find((entry) => entry.id === text(body.memberId))
+        if (member === undefined) return json({ ok: false, error: '找不到该成员' }, 404)
+        member.avatar = { kind: 'image', imageId: id }
+        await saveStore(store)
+        return json(await snapshot())
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }

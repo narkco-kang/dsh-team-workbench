@@ -4,3 +4,5 @@ backup/
 node_modules/
 .DS_Store
 *.log
+.preview/
+.npm-cache/
