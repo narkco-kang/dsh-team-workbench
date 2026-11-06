@@ -1828,7 +1828,7 @@ window.__ModuleLoader__.load({
           panelTitle: "智能体团队",
           repository: "https://github.com/narkco-kang/dsh-team-workbench",
           description: "一支可分组、可换头像与表情的具名智能体团队：内置 313 个角色可按需加入，默认项目部角色配置；每人一组模型路由按序回退派发，并管理本机共享技能库。",
-          layout: { businessSide: "right", businessWidth: 0.6 }
+          customFrame: true
         }, WorkbenchPanel);
       }, "team-workbench: register");
     }
