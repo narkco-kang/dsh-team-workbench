@@ -221,6 +221,12 @@ window.__ModuleLoader__.load({
       ".ats-compose{flex:0 0 auto;display:flex;gap:6px;align-items:flex-end;padding:8px 10px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.16));}",
       ".ats-compose .ats-area{flex:1 1 auto;min-height:40px;resize:none;}",
       ".ats-check-list{display:flex;flex-wrap:wrap;gap:6px 12px;max-height:120px;overflow:auto;margin:6px 0;}",
+      ".ats-mascot .ats-mascot-bob{animation:ats-bob 3.8s ease-in-out infinite;transform-origin:50% 60%;}",
+      ".ats-mascot.working .ats-mascot-bob{animation-duration:1.1s;}",
+      ".ats-mascot .ats-mascot-eyes{transform-box:fill-box;transform-origin:center;animation:ats-blink 5.2s infinite;}",
+      ".ats-mascot.sleeping .ats-mascot-eyes{animation:none;transform:scaleY(.12);}",
+      "@keyframes ats-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.2px)}}",
+      "@keyframes ats-blink{0%,92%,100%{transform:scaleY(1)}94%,96%{transform:scaleY(.08)}}",
       "@media (max-width:720px){.ats-grid{grid-template-columns:1fr;}.tw-title{display:none;}}",
     ].join("\n");
     //#region 宿主通信    //#region 宿主通信
@@ -375,27 +381,94 @@ window.__ModuleLoader__.load({
 
     //#region 成员卡片
     //#region 头像与身份
-    /** 头像：emoji + 配色渐变底；已上传图片时改渲染图片。 */
+    /** 稳定的数字哈希：同一成员的动态表情每次渲染一致。 */
+    function hashOf(value) {
+      var text = String(value || "");
+      var hash = 0;
+      for (var i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+      return Math.abs(hash);
+    }
+
+    /** 把 #rrggbb 调暗/调亮，用于渐变第二档。 */
+    function shade(hex, factor) {
+      var channel = function (start) {
+        var value = parseInt(hex.slice(start, start + 2), 16);
+        return Math.max(0, Math.min(255, Math.round(value * factor)));
+      };
+      return "#" + [1, 3, 5].map(function (start) { return channel(start).toString(16).padStart(2, "0"); }).join("");
+    }
+
+    var MASCOT_SHAPES = [
+      { kind: "rect", node: function (id) { return h("rect", { x: 10, y: 10, width: 44, height: 46, rx: 16, fill: "url(#" + id + ")" }); } },
+      { kind: "circle", node: function (id) { return h("circle", { cx: 32, cy: 34, r: 23, fill: "url(#" + id + ")" }); } },
+      { kind: "blob", node: function (id) { return h("path", { d: "M32 9c14 0 24 9 24 23 0 13-9 23-24 23S8 45 8 32C8 18 18 9 32 9z", fill: "url(#" + id + ")" }); } },
+      { kind: "hex", node: function (id) { return h("path", { d: "M32 9l20 11.5v23L32 55 12 43.5v-23z", fill: "url(#" + id + ")" }); } }
+    ];
+
+    /**
+     * 动态表情：按成员 id 稳定生成一个会呼吸/眨眼的小角色，
+     * 配色来自成员颜色，右下角带成员 emoji 徽章。
+     */
+    function Mascot(props) {
+      var member = props.member;
+      var accent = props.accent || "#2563eb";
+      var size = props.size || 40;
+      var state = props.state || (member.enabled === false ? "sleeping" : "idle");
+      var seed = hashOf(member.id || member.name || member.emoji || "m");
+      var shape = MASCOT_SHAPES[seed % MASCOT_SHAPES.length];
+      var gradientId = "atg" + seed.toString(36);
+      var eyeGap = seed % 3;
+      var leftX = 24 - eyeGap;
+      var rightX = 40 + eyeGap;
+      var blink = "ats-mascot-eyes";
+      return h("svg", {
+        className: "ats-mascot " + state,
+        width: size, height: size, viewBox: "0 0 64 64",
+        role: "img", "aria-label": member.name,
+        style: { flex: "0 0 auto", display: "block" }
+      },
+        h("defs", null,
+          h("linearGradient", { id: gradientId, x1: "0", y1: "0", x2: "0.4", y2: "1" },
+            h("stop", { offset: "0%", stopColor: accent }),
+            h("stop", { offset: "100%", stopColor: shade(accent, 0.55) })
+          )
+        ),
+        h("g", { className: "ats-mascot-bob" },
+          shape.node(gradientId),
+          h("ellipse", { cx: 23, cy: 21, rx: 8, ry: 4, fill: "#fff", opacity: 0.18 }),
+          (seed % 2 === 0)
+            ? h("path", { d: "M32 10V4", stroke: shade(accent, 0.6), strokeWidth: 2, strokeLinecap: "round" })
+            : null,
+          (seed % 2 === 0) ? h("circle", { cx: 32, cy: 3.4, r: 2.4, fill: "#fbbf24" }) : null,
+          h("g", { className: blink },
+            h("ellipse", { cx: leftX, cy: 34, rx: 6.2, ry: 7, fill: "#fff" }),
+            h("ellipse", { cx: rightX, cy: 34, rx: 6.2, ry: 7, fill: "#fff" }),
+            h("circle", { cx: leftX + 0.6, cy: 35, r: 3.1, fill: "#1f2937" }),
+            h("circle", { cx: rightX + 0.6, cy: 35, r: 3.1, fill: "#1f2937" }),
+            h("circle", { cx: leftX + 1.6, cy: 33.8, r: 1.1, fill: "#fff" }),
+            h("circle", { cx: rightX + 1.6, cy: 33.8, r: 1.1, fill: "#fff" })
+          ),
+          (seed % 3 === 0)
+            ? h("path", { d: "M27 45q5 3 10 0", stroke: "#1f2937", strokeWidth: 1.8, strokeLinecap: "round", fill: "none", opacity: 0.75 })
+            : h("circle", { cx: 32, cy: 45, r: 2.2, fill: "#1f2937", opacity: 0.6 }),
+          h("circle", { cx: 51, cy: 52, r: 8, fill: "#fff", opacity: 0.9 }),
+          h("text", { x: 51, y: 52, textAnchor: "middle", dominantBaseline: "central", fontSize: 10 }, member.emoji || "🤖")
+        )
+      );
+    }
+
+    /** 头像：上传了图片就显示图片，否则渲染动态表情。 */
     function Avatar(props) {
       var member = props.member;
       var accent = props.accent;
       var size = props.size || 40;
       var image = member.avatar && member.avatar.kind === "image" && member.avatar.imageId ? member.avatar.imageId : "";
-      var base = {
-        width: size, height: size,
-        borderRadius: size >= 36 ? 12 : 9,
-        flex: "0 0 auto",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.round(size * 0.5),
-        lineHeight: 1,
-        background: "linear-gradient(145deg," + tint(accent, 0.95) + "," + tint(accent, 0.38) + ")",
-        boxShadow: "inset 0 0 0 1px " + tint(accent, 0.5),
-        overflow: "hidden"
-      };
       if (image.length > 0) {
-        return h("span", { className: "ats-avatar", style: base, title: member.name },
+        return h("span", {
+          className: "ats-avatar",
+          style: { width: size, height: size, borderRadius: size >= 36 ? 12 : 9, overflow: "hidden", flex: "0 0 auto", display: "inline-flex" },
+          title: member.name
+        },
           h("img", {
             src: ROUTE_AVATAR + "?id=" + encodeURIComponent(image),
             alt: member.name,
@@ -403,7 +476,9 @@ window.__ModuleLoader__.load({
           })
         );
       }
-      return h("span", { className: "ats-avatar", style: base, title: member.name + " · " + (member.emoji || "🤖") }, member.emoji || "🤖");
+      return h("span", { className: "ats-avatar", style: { width: size, height: size, flex: "0 0 auto", display: "inline-flex" }, title: member.name + " · " + (member.emoji || "🤖") },
+        h(Mascot, { member: member, accent: accent, size: size, state: props.state || (member.enabled === false ? "sleeping" : "idle") })
+      );
     }
 
     /** 把文件裁成 160×160 webp（照 DS-Bot 的做法），尽量控制在 150 KB 内。 */
@@ -529,7 +604,7 @@ window.__ModuleLoader__.load({
             type: "checkbox", checked: props.selected === true, title: "选中以批量操作",
             onChange: function () { props.onSelectToggle(member.id); }
           }),
-          h(Avatar, { member: member, accent: accent, size: 38 }),
+          h(Avatar, { member: member, accent: accent, size: 38, state: busy ? "working" : (member.enabled === false ? "sleeping" : "idle") }),
           h("div", { className: "ats-id" },
             h("div", { className: "ats-name-line" },
               h("span", { className: "ats-name" }, member.name),
@@ -1251,7 +1326,7 @@ window.__ModuleLoader__.load({
 
       var openForm = function () {
         var members = data.private || [];
-        setForm({ name: "", adminId: members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }) });
+        setForm({ name: "", adminId: members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1 });
       };
       var submitForm = function () {
         if (form === null) return;
@@ -1283,7 +1358,9 @@ window.__ModuleLoader__.load({
       var currentMember = target !== null && target.kind === "private" ? members.filter(function (m) { return m.memberId === target.id; })[0] : null;
       var currentRoom = target !== null && target.kind === "group" ? rooms.filter(function (r) { return r.id === target.id; })[0] : null;
       var title = currentMember ? currentMember.name : currentRoom ? currentRoom.name : "";
-      var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员" : "";
+      var responderLabel = currentRoom ? (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "只回应 @" : "管理员先答") : "";
+      var relayDepth = currentRoom && typeof currentRoom.relayDepth === "number" ? currentRoom.relayDepth : 1;
+      var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员 · " + responderLabel + " · 接力 " + String(relayDepth) + " 层" : "";
 
       var listItems = mode === "private"
         ? members.map(function (m) {
@@ -1292,7 +1369,7 @@ window.__ModuleLoader__.load({
               key: m.memberId, type: "button", className: "ats-chat-item" + (on ? " on" : ""),
               onClick: function () { pickPrivate(m.memberId); }
             },
-              h("span", { className: "ats-chat-emoji", style: { background: tint(colorOf(m, members.indexOf(m)), 0.22) } }, m.emoji || "🤖"),
+              h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 28 }),
               h("span", { className: "ats-chat-meta" },
                 h("span", { className: "ats-chat-name" }, m.name),
                 h("span", { className: "ats-chat-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")
@@ -1332,6 +1409,12 @@ window.__ModuleLoader__.load({
                 h("input", { className: "ats-input", style: { flex: "1 1 140px" }, value: form.name, placeholder: "群名称，例如：项目例会", onChange: function (e) { setForm(Object.assign({}, form, { name: e.target.value })); } }),
                 h("select", { className: "ats-select", style: { flex: "0 0 160px" }, value: form.adminId, onChange: function (e) { setForm(Object.assign({}, form, { adminId: e.target.value })); } },
                   [{ value: "", label: "管理员（默认首位）" }].concat(members.map(function (m) { return { value: m.memberId, label: "管理员：" + m.name }; })).map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                ),
+                h("select", { className: "ats-select", style: { flex: "0 0 150px" }, value: form.responder || "lead", onChange: function (e) { setForm(Object.assign({}, form, { responder: e.target.value })); } },
+                  [{ value: "lead", label: "应答：管理员" }, { value: "auto", label: "应答：自动挑人" }, { value: "mention", label: "应答：只回应 @" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                ),
+                h("select", { className: "ats-select", style: { flex: "0 0 120px" }, value: String(form.relayDepth === undefined ? 1 : form.relayDepth), onChange: function (e) { setForm(Object.assign({}, form, { relayDepth: Number(e.target.value) })); } },
+                  [{ value: "0", label: "接力：不转发" }, { value: "1", label: "接力：1 层" }, { value: "2", label: "接力：2 层" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 )
               ),
               h("div", { className: "ats-check-list" },
@@ -1389,7 +1472,7 @@ window.__ModuleLoader__.load({
                     }
                     var accent = colorOf(m, 0);
                     return h("div", { key: m.id, className: "ats-bubble agent" },
-                      h("span", { className: "ats-chat-emoji small", style: { background: tint(accent, 0.22) } }, m.emoji || "🤖"),
+                      h(Mascot, { member: { id: m.memberId, name: m.name, emoji: m.emoji }, accent: accent, size: 24 }),
                       h("div", { className: "ats-bubble-body" },
                         h("div", { className: "ats-bubble-name" }, m.name),
                         h("div", { className: "ats-bubble-text" }, m.text)

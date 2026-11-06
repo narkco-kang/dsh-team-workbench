@@ -200,7 +200,43 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   return { messages: thread.messages, reply }
 }
 
-/** 群聊：管理员回复 + @ 指派。 */
+/** 应答模式：lead = 管理员先答，auto = 按内容挑最合适的人，mention = 只回应 @。 */
+const RESPONDERS = ['lead', 'auto', 'mention']
+
+function responderOf(room) {
+  return RESPONDERS.includes(room.responder) ? room.responder : 'lead'
+}
+
+function relayDepthOf(room) {
+  const value = Number(room.relayDepth)
+  return Number.isSafeInteger(value) && value >= 0 && value <= 2 ? value : 1
+}
+
+/**
+ * 本地「决策模型」：按消息与成员名字/职责的字符二元组重合度挑人。
+ * 借用 OpenMausBot 的 Auto 思路，但不依赖外部分类服务；分数低于 2 时回退给管理员。
+ */
+function pickAutoResponder(userText, members, exclude) {
+  const lower = userText.toLowerCase()
+  let best = null
+  let bestScore = 0
+  for (const member of members) {
+    if (exclude.has(member.id)) continue
+    const hay = (member.name + ' ' + member.role).toLowerCase()
+    const grams = new Set()
+    for (let i = 0; i < hay.length - 1; i += 1) {
+      const gram = hay.slice(i, i + 2)
+      if (gram.trim().length === 2) grams.add(gram)
+    }
+    let score = 0
+    for (let i = 0; i < lower.length - 1; i += 1) if (grams.has(lower.slice(i, i + 2))) score += 1
+    if (userText.includes(member.name)) score += 6
+    if (score > bestScore) { best = member; bestScore = score }
+  }
+  return bestScore >= 2 ? best : null
+}
+
+/** 群聊：按应答模式选人，管理员可 @ 指派，成员之间按接力层数继续。 */
 export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const chats = await loadChats()
   const target = chats.rooms.find((entry) => entry.id === room.id)
@@ -211,30 +247,48 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   pushMessage(target.messages, messageOf('user', null, userText))
   await saveChats(chats)
 
-  const turns = []
+  const responder = responderOf(target)
+  const relayDepth = relayDepthOf(target)
   const used = new Set()
+  const turns = []
   const asked = parseMentions(userText, alive, [])
-  const start = asked.length > 0 ? asked.slice(0, MAX_MENTIONS) : (admin ? [admin] : [])
+
+  let start = []
+  let pickedId = ''
+  if (asked.length > 0) {
+    start = asked.slice(0, MAX_MENTIONS)
+  } else if (responder === 'mention') {
+    start = []
+  } else if (responder === 'auto') {
+    const picked = pickAutoResponder(userText, alive, used)
+    pickedId = picked ? picked.id : (admin ? admin.id : '')
+    start = picked ? [picked] : (admin ? [admin] : [])
+  } else {
+    start = admin ? [admin] : []
+  }
+
+  if (start.length === 0) return { messages: target.messages, turns, responder, pickedId }
+
   let queue = start
   let depth = 0
+  let lastSpeaker = ''
 
-  while (queue.length > 0 && turns.length < MAX_TURNS_PER_MESSAGE && depth <= 1) {
+  while (queue.length > 0 && turns.length < MAX_TURNS_PER_MESSAGE && depth <= relayDepth) {
     const next = []
     for (const member of queue) {
       if (used.has(member.id)) continue
       used.add(member.id)
       if (turns.length >= MAX_TURNS_PER_MESSAGE) break
-      const prompt = asked.length > 0 && depth === 0
-        ? memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, '')
-        : member.id === (admin ? admin.id : '')
-          ? adminPrompt(target, alive, target.messages.slice(0, -1), userText)
-          : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, admin ? admin.name : '')
+      const prompt = depth === 0 && admin !== undefined && member.id === admin.id
+        ? adminPrompt(target, alive, target.messages.slice(0, -1), userText)
+        : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker)
       const reply = await runMember(ctx, parent, member, prompt, signal)
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
       target.updatedAt = new Date().toISOString()
       await saveChats(chats)
-      for (const mentioned of parseMentions(reply.text, alive, [...used])) {
+      lastSpeaker = member.name
+      for (const mentioned of parseMentions(reply.text, alive, used)) {
         if (next.length >= MAX_MENTIONS) break
         next.push(mentioned)
       }
@@ -242,7 +296,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     queue = next
     depth += 1
   }
-  return { messages: target.messages, turns }
+  return { messages: target.messages, turns, responder, pickedId }
 }
 
 /** 面板需要的会话概览。 */
@@ -274,6 +328,8 @@ export async function chatOverview(ctx) {
         adminId: room.adminId,
         adminName: (byId.get(room.adminId) || {}).name || '',
         memberIds: room.memberIds.filter((id) => byId.has(id)),
+        responder: responderOf(room),
+        relayDepth: relayDepthOf(room),
         count: Array.isArray(room.messages) ? room.messages.length : 0,
         lastText: last ? last.text.slice(0, 120) : '',
         updatedAt: room.updatedAt || ''
@@ -295,7 +351,10 @@ export async function applyRoomAction(body) {
     const memberIds = (Array.isArray(body?.room?.memberIds) ? body.room.memberIds : []).filter((id) => known.has(id))
     if (memberIds.length < 2) return { error: '群聊至少需要 2 名成员' }
     const adminId = known.has(text(body?.room?.adminId)) && memberIds.includes(text(body.room.adminId)) ? text(body.room.adminId) : memberIds[0]
-    const room = { id: makeId('room'), name, adminId, memberIds, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
+    const responder = RESPONDERS.includes(text(body?.room?.responder)) ? text(body.room.responder) : 'lead'
+    const relayValue = Number(body?.room?.relayDepth)
+    const relayDepth = Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2 ? relayValue : 1
+    const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
     chats.rooms.push(room)
     await saveChats(chats)
     return { room }
@@ -321,6 +380,9 @@ export async function applyRoomAction(body) {
     }
     const adminId = text(body?.room?.adminId)
     if (adminId.length > 0 && room.memberIds.includes(adminId)) room.adminId = adminId
+    if (RESPONDERS.includes(text(body?.room?.responder))) room.responder = text(body.room.responder)
+    const relayValue = Number(body?.room?.relayDepth)
+    if (Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2) room.relayDepth = relayValue
     await saveChats(chats)
     return { room }
   }

@@ -102,6 +102,20 @@ check('被 @ 的成员确实收到了任务', prompts.some((p) => p.includes('@ 
 const direct = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '@' + engineer.name + ' 你直接说结论' })
 check('用户 @ 成员时跳过管理员', direct.ok === true && direct.turns.length === 1 && direct.turns[0].name === engineer.name, direct.turns && direct.turns[0] && direct.turns[0].name)
 
+const testAuto = members.find((m) => m.name === '测试自动化工程师') || members[2]
+const autoRoomRes = await call('/api/team-workbench/chats/rooms', {
+  action: 'create',
+  room: { name: '自动分诊', adminId: architect.id, memberIds: [architect.id, engineer.id, testAuto.id], responder: 'auto', relayDepth: 0 }
+})
+check('创建 Auto 应答房', autoRoomRes.ok === true && autoRoomRes.room.responder === 'auto', autoRoomRes.error || '')
+const autoMsg = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: autoRoomRes.room.id, text: '这次接口自动化测试怎么安排？' })
+check('Auto 模式挑了匹配的人', autoMsg.ok === true && autoMsg.pickedId.length > 0 && autoMsg.turns[0].memberId === autoMsg.pickedId, autoMsg.turns && autoMsg.turns[0] && autoMsg.turns[0].name)
+check('relayDepth=0 时只跑第一棒', autoMsg.turns.length === 1, String(autoMsg.turns && autoMsg.turns.length))
+
+await call('/api/team-workbench/chats/rooms', { action: 'update', id: roomId, room: { relayDepth: 0 } })
+const shallow = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '再确认一下范围' })
+check('lead 房 relayDepth=0 不再转发 @', shallow.turns.length === 1 && shallow.turns[0].name === architect.name, String(shallow.turns && shallow.turns.length))
+
 const toolNames = tools.map((t) => t.name)
 check('注册了 agent_team_chat 与 agent_team_group_chat', toolNames.includes('agent_team_chat') && toolNames.includes('agent_team_group_chat'), toolNames.join(','))
 const chatTool = tools.find((t) => t.name === 'agent_team_chat')
