@@ -1,6 +1,3 @@
-    //#region 会话（私聊 / 群聊）
-    var CHAT_POLL_MS = 0;
-
     function ChatPanel(props) {
       var scope = props.scope || {};
       var sessionId = resolveSessionId(scope);
@@ -9,9 +6,6 @@
       var dataState = useState({ loading: true, error: "", private: [], rooms: [] });
       var data = dataState[0];
       var setData = dataState[1];
-      var modeState = useState("private");
-      var mode = modeState[0];
-      var setMode = modeState[1];
       var targetState = useState(initial.length > 0 ? { kind: "private", id: initial } : null);
       var target = targetState[0];
       var setTarget = targetState[1];
@@ -52,14 +46,8 @@
         });
       }, [target]);
 
-      var pickPrivate = function (memberId) {
-        setMode("private");
-        setTarget({ kind: "private", id: memberId });
-      };
-      var pickRoom = function (roomId) {
-        setMode("group");
-        setTarget({ kind: "group", id: roomId });
-      };
+      var pickPrivate = function (memberId) { setTarget({ kind: "private", id: memberId }); };
+      var pickRoom = function (roomId) { setTarget({ kind: "group", id: roomId }); };
 
       var send = function () {
         var body = draft.trim();
@@ -77,15 +65,13 @@
             setDraft("");
             loadOverview();
           })
-          .catch(function (error) {
-            setBanner(String(error && error.message ? error.message : error));
-          })
+          .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
           .then(function () { setBusy(false); });
       };
 
       var openForm = function () {
         var members = data.private || [];
-        setForm({ name: "", adminId: members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }) });
+        setForm({ name: "", adminId: members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1 });
       };
       var submitForm = function () {
         if (form === null) return;
@@ -117,55 +103,110 @@
       var currentMember = target !== null && target.kind === "private" ? members.filter(function (m) { return m.memberId === target.id; })[0] : null;
       var currentRoom = target !== null && target.kind === "group" ? rooms.filter(function (r) { return r.id === target.id; })[0] : null;
       var title = currentMember ? currentMember.name : currentRoom ? currentRoom.name : "";
-      var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员" : "";
+      var responderLabel = currentRoom ? (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "只回应 @" : "管理员先答") : "";
+      var relayDepth = currentRoom && typeof currentRoom.relayDepth === "number" ? currentRoom.relayDepth : 1;
+      var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员 · " + responderLabel + " · 接力 " + String(relayDepth) + " 层" : "";
 
-      var listItems = mode === "private"
-        ? members.map(function (m) {
-            var on = target !== null && target.kind === "private" && target.id === m.memberId;
-            return h("button", {
-              key: m.memberId, type: "button", className: "ats-chat-item" + (on ? " on" : ""),
-              onClick: function () { pickPrivate(m.memberId); }
-            },
-              h("span", { className: "ats-chat-emoji", style: { background: tint(colorOf(m, members.indexOf(m)), 0.22) } }, m.emoji || "🤖"),
-              h("span", { className: "ats-chat-meta" },
-                h("span", { className: "ats-chat-name" }, m.name),
-                h("span", { className: "ats-chat-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")
-              )
-            );
-          })
-        : rooms.map(function (room) {
-            var on = target !== null && target.kind === "group" && target.id === room.id;
-            return h("button", {
-              key: room.id, type: "button", className: "ats-chat-item" + (on ? " on" : ""),
-              onClick: function () { pickRoom(room.id); }
-            },
-              h("span", { className: "ats-chat-emoji", style: { background: "rgba(37,99,235,.16)" } }, "👥"),
-              h("span", { className: "ats-chat-meta" },
-                h("span", { className: "ats-chat-name" }, room.name),
-                h("span", { className: "ats-chat-preview" }, room.count > 0 ? (room.lastText || "…") : "还没有发言")
-              )
-            );
-          });
+      var memberRow = function (m) {
+        var on = target !== null && target.kind === "private" && target.id === m.memberId;
+        return h("button", {
+          key: m.memberId, type: "button", className: "ats-im-row" + (on ? " on" : ""),
+          onClick: function () { pickPrivate(m.memberId); }
+        },
+          h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 32 }),
+          h("span", { className: "ats-im-meta" },
+            h("span", { className: "ats-im-name" }, m.name),
+            h("span", { className: "ats-im-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")
+          )
+        );
+      };
+      var roomRow = function (room) {
+        var on = target !== null && target.kind === "group" && target.id === room.id;
+        return h("button", {
+          key: room.id, type: "button", className: "ats-im-row" + (on ? " on" : ""),
+          onClick: function () { pickRoom(room.id); }
+        },
+          h("span", { className: "ats-im-group-avatar" }, "👥"),
+          h("span", { className: "ats-im-meta" },
+            h("span", { className: "ats-im-name" }, room.name),
+            h("span", { className: "ats-im-preview" }, room.count > 0 ? (room.lastText || "…") : "还没有发言")
+          )
+        );
+      };
 
-      return h("div", { className: "ats-root ats-chat" },
-        h("div", { className: "ats-hero" },
-          h("div", { style: { minWidth: 0 } },
-            h("div", { className: "ats-hero-title" }, "会话"),
-            h("div", { className: "ats-hero-sub" }, "和单个成员私聊，或在群里让管理员分活；聊天记录存本机")
+      return h("div", { className: "ats-root ats-im" },
+        h("div", { className: "ats-im-side" },
+          h("div", { className: "ats-im-hero" },
+            h("span", { className: "ats-im-logo" }, "🧑‍🤝‍🧑"),
+            h("div", { className: "ats-im-hero-text" },
+              h("div", { className: "ats-im-hero-name" }, "智能体团队"),
+              h("div", { className: "ats-im-hero-sub" }, String(members.length) + " 名成员 · " + String(rooms.length) + " 个群")
+            )
           ),
-          h("span", { className: "ats-spacer" }),
-          h("button", { className: "ats-btn tiny" + (mode === "private" ? " primary" : ""), type: "button", onClick: function () { setMode("private"); } }, "私聊"),
-          h("button", { className: "ats-btn tiny" + (mode === "group" ? " primary" : ""), type: "button", onClick: function () { setMode("group"); } }, "群聊"),
-          h("button", { className: "ats-btn tiny", type: "button", disabled: busy, onClick: openForm }, "＋ 建群")
+          h("div", { className: "ats-im-section" }, "群聊"),
+          rooms.map(roomRow),
+          h("button", { className: "ats-im-add", type: "button", onClick: openForm }, "＋ 建群"),
+          h("div", { className: "ats-im-section" }, "私聊"),
+          members.map(memberRow)
         ),
-
+        h("div", { className: "ats-im-main" },
+          target === null
+            ? h("div", { className: "ats-empty" }, "从左侧选一个成员或群聊开始")
+            : h("div", { className: "ats-im-head" },
+                currentRoom
+                  ? h("span", { className: "ats-im-group-avatar" }, "👥")
+                  : h(Avatar, { member: { id: currentMember.memberId, name: currentMember.name, emoji: currentMember.emoji, color: currentMember.color, enabled: true }, accent: colorOf(currentMember, members.indexOf(currentMember)), size: 34 }),
+                h("div", { className: "ats-im-head-text" },
+                  h("div", { className: "ats-im-title" }, title),
+                  h("div", { className: "ats-im-sub" }, subtitle || (currentMember ? (currentMember.count > 0 ? currentMember.lastText : "私聊") : ""))
+                ),
+                h("span", { className: "ats-spacer" }),
+                h("button", { className: "ats-btn tiny", type: "button", onClick: function () { if (props.onOpenSettings) props.onOpenSettings(); } }, "设置"),
+                currentRoom ? h("button", { className: "ats-btn tiny danger", type: "button", onClick: function () { removeRoom(currentRoom.id); } }, "删除群") : null
+              ),
+          target === null ? null : h("div", {
+            className: "ats-chat-log",
+            ref: function (el) { if (el !== null) el.scrollTop = el.scrollHeight; }
+          },
+            messages.length === 0
+              ? h("div", { className: "ats-empty" }, currentRoom ? "群已建好，说点什么让成员接话" : "打个招呼开始对话")
+              : messages.map(function (m) {
+                  if (m.role === "user") return h("div", { key: m.id, className: "ats-bubble user" }, h("div", { className: "ats-bubble-text" }, m.text));
+                  var accent = colorOf(m, 0);
+                  return h("div", { key: m.id, className: "ats-bubble agent" },
+                    h(Mascot, { member: { id: m.memberId, name: m.name, emoji: m.emoji }, accent: accent, size: 26 }),
+                    h("div", { className: "ats-bubble-body" },
+                      h("div", { className: "ats-bubble-name" }, m.name),
+                      h("div", { className: "ats-bubble-text" }, m.text)
+                    )
+                  );
+                })
+          ),
+          target === null ? null : h("div", { className: "ats-compose" },
+            h("button", { className: "ats-btn", type: "button", title: "新建群聊", onClick: openForm }, "＋"),
+            h("textarea", {
+              className: "ats-area", rows: 2, value: draft,
+              placeholder: currentRoom ? "在群里发言；@成员名 可直接点名（Enter 发送）" : "发消息给 " + title + "（Enter 发送，Shift+Enter 换行）",
+              disabled: busy,
+              onChange: function (e) { setDraft(e.target.value); },
+              onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+            }),
+            h("button", { className: "ats-btn primary", type: "button", disabled: busy || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
+          )
+        ),
         form !== null
-          ? h("div", { className: "ats-preset" },
+          ? h("div", { className: "ats-im-form" },
               h("div", { className: "ats-preset-title" }, "新建群聊"),
               h("div", { className: "ats-bar", style: { padding: "6px 0", border: "0" } },
-                h("input", { className: "ats-input", style: { flex: "1 1 140px" }, value: form.name, placeholder: "群名称，例如：项目例会", onChange: function (e) { setForm(Object.assign({}, form, { name: e.target.value })); } }),
-                h("select", { className: "ats-select", style: { flex: "0 0 160px" }, value: form.adminId, onChange: function (e) { setForm(Object.assign({}, form, { adminId: e.target.value })); } },
+                h("input", { className: "ats-input", style: { flex: "1 1 120px" }, value: form.name, placeholder: "群名称，例如：项目例会", onChange: function (e) { setForm(Object.assign({}, form, { name: e.target.value })); } }),
+                h("select", { className: "ats-select", style: { flex: "0 0 140px" }, value: form.adminId, onChange: function (e) { setForm(Object.assign({}, form, { adminId: e.target.value })); } },
                   [{ value: "", label: "管理员（默认首位）" }].concat(members.map(function (m) { return { value: m.memberId, label: "管理员：" + m.name }; })).map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                ),
+                h("select", { className: "ats-select", style: { flex: "0 0 120px" }, value: form.responder || "lead", onChange: function (e) { setForm(Object.assign({}, form, { responder: e.target.value })); } },
+                  [{ value: "lead", label: "应答：管理员" }, { value: "auto", label: "应答：自动挑人" }, { value: "mention", label: "应答：只回应 @" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                ),
+                h("select", { className: "ats-select", style: { flex: "0 0 110px" }, value: String(form.relayDepth === undefined ? 1 : form.relayDepth), onChange: function (e) { setForm(Object.assign({}, form, { relayDepth: Number(e.target.value) })); } },
+                  [{ value: "0", label: "接力：不转发" }, { value: "1", label: "接力：1 层" }, { value: "2", label: "接力：2 层" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 )
               ),
               h("div", { className: "ats-check-list" },
@@ -191,57 +232,6 @@
               )
             )
           : null,
-
-        banner ? h("div", { className: "ats-sub", style: { color: "#dc2626" } }, banner) : null,
-
-        h("div", { className: "ats-chat-body" },
-          h("div", { className: "ats-chat-list" },
-            data.loading ? h("div", { className: "ats-empty" }, "读取中…") : listItems.length === 0
-              ? h("div", { className: "ats-empty" }, mode === "private" ? "团队还没有成员" : "还没有群聊，点「＋ 建群」")
-              : listItems
-          ),
-          h("div", { className: "ats-chat-main" },
-            target === null
-              ? h("div", { className: "ats-empty" }, "从左侧选一个成员或群聊开始对话")
-              : h("div", { className: "ats-chat-head" },
-                  h("div", { style: { minWidth: 0 } },
-                    h("div", { className: "ats-chat-title" }, title),
-                    h("div", { className: "ats-chat-sub" }, subtitle)
-                  ),
-                  h("span", { className: "ats-spacer" }),
-                  currentRoom ? h("button", { className: "ats-btn tiny danger", type: "button", onClick: function () { removeRoom(currentRoom.id); } }, "删除群") : null
-                ),
-            target === null ? null : h("div", {
-              className: "ats-chat-log",
-              ref: function (el) { if (el !== null) el.scrollTop = el.scrollHeight; }
-            },
-              messages.length === 0
-                ? h("div", { className: "ats-empty" }, currentRoom ? "群已建好，说点什么让管理员分活" : "打个招呼开始对话")
-                : messages.map(function (m) {
-                    if (m.role === "user") {
-                      return h("div", { key: m.id, className: "ats-bubble user" }, h("div", { className: "ats-bubble-text" }, m.text));
-                    }
-                    var accent = colorOf(m, 0);
-                    return h("div", { key: m.id, className: "ats-bubble agent" },
-                      h("span", { className: "ats-chat-emoji small", style: { background: tint(accent, 0.22) } }, m.emoji || "🤖"),
-                      h("div", { className: "ats-bubble-body" },
-                        h("div", { className: "ats-bubble-name" }, m.name),
-                        h("div", { className: "ats-bubble-text" }, m.text)
-                      )
-                    );
-                  })
-            ),
-            target === null ? null : h("div", { className: "ats-compose" },
-              h("textarea", {
-                className: "ats-area", rows: 2, value: draft, placeholder: currentRoom ? "在群里发言；@成员名 可直接点名（Enter 发送）" : "发消息给 " + title + "（Enter 发送，Shift+Enter 换行）",
-                disabled: busy,
-                onChange: function (e) { setDraft(e.target.value); },
-                onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
-              }),
-              h("button", { className: "ats-btn primary", type: "button", disabled: busy || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
-            )
-          )
-        )
+        banner ? h("div", { className: "ats-im-banner" }, banner) : null
       );
     }
-    //#endregion
