@@ -68,8 +68,9 @@ const d = registered[0] && registered[0].descriptor
 check('描述符有 title', d && typeof d.title === 'string' && d.title.length > 0, d && d.title)
 check('描述符有 repository（GitHub URL）', d && /^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(d.repository || ''), d && d.repository)
 check('描述符有 description', d && typeof d.description === 'string' && d.description.length > 0)
-check('布局 businessSide = right', d && d.layout && d.layout.businessSide === 'right', d && JSON.stringify(d.layout))
-check('布局 businessWidth 在 0.25–0.7', d && d.layout && d.layout.businessWidth >= 0.25 && d.layout.businessWidth <= 0.7, d && String(d.layout.businessWidth))
+const fullPage = d !== undefined && d !== null && d.customFrame === true
+check('整页模式（customFrame）或右侧分栏', fullPage || (d && d.layout && d.layout.businessSide === 'right'), fullPage ? 'customFrame' : (d && JSON.stringify(d.layout)))
+check('分栏宽度在 0.25–0.7（整页模式不适用）', fullPage || (d && d.layout && d.layout.businessWidth >= 0.25 && d.layout.businessWidth <= 0.7), fullPage ? '整页' : (d && String(d.layout.businessWidth)))
 check('业务组件是个函数', registered[0] && typeof registered[0].Component === 'function')
 
 // —— 3. 源码里不应再有浮动载体 ——

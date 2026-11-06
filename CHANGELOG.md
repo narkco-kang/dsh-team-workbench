@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.6.1 — 2026-11-07
+
+- 修复 smoke-client 对 `customFrame` 整页模式的断言（1.6.0 因此没发出 Release）。
+
+## 1.6.0 — 2026-11-07
 ## 1.6.0 — 2026-11-07
 
 - 工作台改为**整页模式**（`register({ customFrame: true })`）：不再挤在右侧分栏里，
