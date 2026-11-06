@@ -126,6 +126,10 @@ check('团队标签输出含外壳与三个标签按钮', team.html.includes('tw
 check('团队标签渲染出团队面板根节点', team.html.includes('ats-root'), team.html.includes('ats-root') ? undefined : team.html.slice(0, 200))
 check('团队标签渲染出搜索/新建/预设等真实控件', team.html.includes('搜索') && team.html.includes('新建') && team.html.includes('项目部预设'))
 
+const chat = renderWith('chat')
+check('会话标签渲染成功（无抛错）', !chat.errors.some((e) => e.startsWith('render 抛错')), chat.errors.find((e) => e.startsWith('render 抛错')))
+check('会话标签渲染出私聊/群聊/建群', chat.html.includes('私聊') && chat.html.includes('群聊') && chat.html.includes('建群'))
+
 const roles = renderWith('roles')
 check('角色库标签渲染成功（无抛错）', !roles.errors.some((e) => e.startsWith('render 抛错')), roles.errors.find((e) => e.startsWith('render 抛错')))
 check('角色库标签渲染出分类与搜索', roles.html.includes('角色库') && roles.html.includes('正在读取角色库'))

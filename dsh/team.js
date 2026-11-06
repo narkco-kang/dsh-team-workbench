@@ -56,10 +56,10 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '1.2.0'
+const PLUGIN_VERSION = '1.3.0'
 
 /** 路由前缀。 */
-const ROUTE_BASE = '/api/team-workbench'
+export const ROUTE_BASE = '/api/team-workbench'
 const STATE_ROUTE = ROUTE_BASE + '/state'
 const MEMBERS_ROUTE = ROUTE_BASE + '/members'
 const PROBE_ROUTE = ROUTE_BASE + '/probe'
@@ -81,7 +81,7 @@ const MAX_ROUTES = 8
 const STORE_VERSION = 3
 
 /** 解析 harness 主目录：优先 DSH_HOME，其次 ~/.dsh。 */
-function harnessHome() {
+export function harnessHome() {
   const fromEnv = process.env.DSH_HOME
   if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim()
   return join(homedir(), '.dsh')
@@ -93,12 +93,12 @@ function storePath() {
 }
 
 /** 生成短小、稳定、可读的 id。 */
-function makeId(prefix) {
+export function makeId(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 }
 
 /** 收敛成去空白字符串。 */
-function text(value) {
+export function text(value) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
@@ -190,7 +190,7 @@ function emptyStore() {
 }
 
 /** 读取团队配置；缺失或损坏时返回空团队。 */
-async function loadStore() {
+export async function loadStore() {
   try {
     const parsed = JSON.parse(await readFile(storePath(), 'utf8'))
     const groups = Array.isArray(parsed?.groups) ? parsed.groups.map(normalizeGroup) : []
@@ -296,7 +296,7 @@ function resolveDefaults(ctx) {
 }
 
 /** JSON 响应。 */
-function json(body, status = 200) {
+export function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
@@ -304,7 +304,7 @@ function json(body, status = 200) {
 }
 
 /** 读取 JSON 请求体。 */
-async function readJson(request) {
+export async function readJson(request) {
   try {
     const value = await request.json()
     return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
@@ -478,7 +478,7 @@ async function withRoleInstructions(member) {
  * 在成员绑定的模型上运行一次委派，失败自动回退到下一条已启用路由。
  * @returns 最终结果 + 每条路由的尝试记录。
  */
-async function dispatchToMember(ctx, parent, rawMember, task, signal) {
+export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
   // 从角色库导入的成员可能只存了 roleRef（正文不落 team.json），派发前补上。
   const member = await withRoleInstructions(rawMember)
   const subagents = ctx.get('subagents')

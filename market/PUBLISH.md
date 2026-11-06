@@ -43,10 +43,11 @@ tarball: https://github.com/narkco-kang/dsh-team-workbench/releases/latest/downl
 npm ci --ignore-scripts && npm run check   # 在 awesome-dsh-workbench 本地跑
 node scripts/smoke-server.mjs              # 本包 9 工具 / 13 路由、释放清空
 node scripts/smoke-v12.mjs                 # 预设 / 角色导入 / 分组 / 检索
+node scripts/smoke-chat.mjs                # 私聊 / 群聊编排
 node scripts/render-client.mjs             # 三个标签真实 SSR
 ```
 
-截图：1280×720 PNG，来自 1.2.0 面板真实渲染，不含本机路径、凭据或个人信息。
+截图：1280×720 PNG，来自 1.3.0 面板真实渲染（团队 / 会话 / 角色库），不含本机路径、凭据或个人信息。
 
 ## 5. 已知限制（写进 PR 描述）
 

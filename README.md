@@ -1,7 +1,7 @@
 # dsh-team-workbench · 智能体团队工作台
 
 一个 **DSH Desktop 原生工作台**：把具名智能体团队、角色库与本机共享技能库放进同一个面板，
-由 Desktop 左侧的工作台入口进出。当前版本 **1.2.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+由 Desktop 左侧的工作台入口进出。当前版本 **1.3.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 ## 1.2.0 做了什么
 
@@ -18,6 +18,18 @@
   业务区宽度 0.52。
 - **可自包含构建**：客户端源码在 src/client，build-client.mjs 只做外壳与 id 注入，
   不再依赖兄弟仓库的绝对行号。
+
+## 1.3.0 做了什么：私聊 + 群聊
+
+- **私聊**：每个成员一个会话，聊天记录存本机；消息带最近 12 条上下文，可连续追问。
+- **群聊**：建群时选成员与管理员；用户发言默认由管理员回复，管理员在回复里 @成员名 会转给对应成员执行；
+  用户也可以直接 @成员 跳过管理员。成员回复里的 @ 再转发一层，每条消息最多 5 个智能体回合、3 次点名。
+- **会话页**：左侧成员 / 群列表，右侧气泡记录与输入框；成员卡上的「聊天」可直接跳进私聊。
+- **模型工具**：`agent_team_chat`（私聊）与 `agent_team_group_chat`（群聊），模型也能主动找成员沟通。
+
+会话记忆是「最近 N 条 + 新消息」的有界窗口，不是复用同一个常驻子会话——宿主 0.13.2 的
+`subagents` 只提供一次性激活，没有稳定的「向同一子会话追加消息」接口；这样做的代价是长对话会
+丢早前上下文，好处是不依赖未公开 API、每次都能用当前路由。
 
 ## 面板结构
 
@@ -43,6 +55,7 @@ cordis.patch.yml             # 服务端入口插入插件树（id: team-workben
 dsh/index.js                 # 组合 team.js + skills.js
 dsh/team.js                  # 团队：store v3 / 分组 / 角色导入 / 预设 / 头像 / 路由 / 工具
 dsh/library.js               # 角色库、预设、头像文件的只读数据层
+dsh/chat.js                  # 私聊 / 群聊：会话存储、管理员与 @ 编排
 dsh/skills.js                # 共享技能库
 lib/client.js                # 客户端 bundle（由 src/client 生成，勿手改）
 src/client/panel.js          # 面板源码（自包含）
@@ -55,10 +68,11 @@ NOTICE-agency-agents-zh.md   # 上游 MIT 归属与版本
 ## 服务端路由与工具
 
 路由都在 /api/team-workbench 下：state、members（含分组动作）、probe、dispatch、
-roles（GET 检索 / POST 导入）、roles/body、preset、avatar，以及技能库的 skills/*。
+roles（GET 检索 / POST 导入）、roles/body、preset、avatar、chats（私聊 / 群聊 / 群管理），
+以及技能库的 skills/*。
 
-模型可见工具 9 个：agent_team_roster、agent_team_dispatch、agent_team_task、
-agent_team_roles，以及技能库的 5 个 skill_manager_*。
+模型可见工具 11 个：agent_team_roster、agent_team_dispatch、agent_team_task、
+agent_team_roles、agent_team_chat、agent_team_group_chat，以及技能库的 5 个 skill_manager_*。
 
 ## 数据位置
 
@@ -99,9 +113,10 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 | 层次 | 覆盖情况 |
 | --- | --- |
-| 客户端注册与渲染 | `smoke-client.mjs`（结构 45 项）+ `render-client.mjs`（真实 React SSR 12 项） |
-| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：9 工具 / 13 路由、释放后登记表清空） |
-| 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，39 项） |
+| 客户端注册与渲染 | `smoke-client.mjs`（结构 45 项）+ `render-client.mjs`（真实 React SSR 14 项） |
+| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 17 路由、释放后登记表清空） |
+| 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
+| 会话功能 | `smoke-chat.mjs`（14 项：私聊连续追问、群聊管理员 @、用户点名、工具调用） |
 | 数据层功能 | `smoke-v12.mjs`（预设 15 人 6 组、角色导入、分组增删、角色检索与正文） |
 | 迁移与安装 | `smoke-migrate.mjs`（假 harness + 假 CLI 真跑，21 项） |
 | 文档口径 | `smoke-docs.mjs`（12 项） |
@@ -111,7 +126,8 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 - [ ] 工作台出现在侧栏入口，且能打开
 - [ ] 侧栏展开/收起、窄窗口下的重排：长中文标题、按钮不被裁切、不横向溢出
-- [ ] 三个标签各完成一次真实业务操作（团队改成员 / 角色库加入角色 / 技能库展开技能）
+- [ ] 四个标签各完成一次真实业务操作（团队改成员 / 会话发消息 / 角色库加入角色 / 技能库展开技能）
+- [ ] 群聊里管理员 @ 成员后，成员回复真实落到群里（本轮只做了假 subagents 的编排测试）
 - [ ] 切回「原生会话」后业务面板整块卸载，无残留浮层或胶囊
 - [ ] 重启与卸载后 team.json、~/.skills-src 数据仍在
 
