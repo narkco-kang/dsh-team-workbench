@@ -1,7 +1,7 @@
 # dsh-team-workbench · 智能体团队工作台
 
 一个 **DSH Desktop 原生工作台**：把具名智能体团队、角色库与本机共享技能库放进同一个面板，
-由 Desktop 左侧的工作台入口进出。当前版本 **1.5.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+由 Desktop 左侧的工作台入口进出。当前版本 **1.7.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 ## 1.2.0 做了什么
 
@@ -19,6 +19,15 @@
 - **可自包含构建**：客户端源码在 src/client，build-client.mjs 只做外壳与 id 注入，
   不再依赖兄弟仓库的绝对行号。
 
+## 1.7.0：会话记录检索
+
+- 顶部标签改为「聊天 / 团队 / 记录 / 角色库 / 技能库」，聊天仍是默认页；
+- 「记录」页检索全部私聊与群聊消息（关键词 + 私聊/群聊过滤），点结果直接回到那段对话；
+- 服务端新增 `GET /chats/search`，按时间倒序返回命中消息与所属会话。
+
+## 1.6.0：整页工作台
+
+工作台改用 `customFrame: true`，占满内容区而不是右侧分栏，会话页左列就是成员/群列表。
 ## 1.5.0：会话页改成 IM 布局（借鉴 DS-Bot）
 
 会话标签不再用「私聊/群聊」开关，而是一个聊天应用式的两栏页面：
@@ -133,10 +142,10 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 | 层次 | 覆盖情况 |
 | --- | --- |
-| 客户端注册与渲染 | `smoke-client.mjs`（结构 45 项）+ `render-client.mjs`（真实 React SSR 14 项） |
+| 客户端注册与渲染 | `smoke-client.mjs`（结构 45 项）+ `render-client.mjs`（真实 React SSR 16 项） |
 | 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 17 路由、释放后登记表清空） |
 | 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
-| 会话功能 | `smoke-chat.mjs`（18 项：私聊连续追问、群聊管理员 @、用户点名、Auto 挑人、接力层数、工具调用） |
+| 会话功能 | `smoke-chat.mjs`（20 项：私聊连续追问、群聊 @、Auto 挑人、接力层数、工具调用、聊天记录检索） |
 | 数据层功能 | `smoke-v12.mjs`（预设 15 人 6 组、角色导入、分组增删、角色检索与正文） |
 | 迁移与安装 | `smoke-migrate.mjs`（假 harness + 假 CLI 真跑，21 项） |
 | 文档口径 | `smoke-docs.mjs`（12 项） |

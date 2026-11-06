@@ -87,6 +87,13 @@ window.fetch = function (url, init) {
   else if (u.indexOf('/api/team-workbench/skills') === 0) data = { ok: true, skills: [], deployed: [] };
   else if (u.indexOf('/api/team-workbench/chats/private') === 0) data = { ok: true, member: null, messages: window.__DSH_PREVIEW__.messages.private };
   else if (u.indexOf('/api/team-workbench/chats/group') === 0) data = { ok: true, room: window.__DSH_PREVIEW__.chats.rooms[0], messages: window.__DSH_PREVIEW__.messages.group };
+  else if (u.indexOf('/api/team-workbench/chats/search') === 0) {
+    var q = decodeURIComponent((u.split('q=')[1] || '').split('&')[0]);
+    var all = [].concat(window.__DSH_PREVIEW__.messages.private.map(function (m) { return { id: m.id, kind: 'private', conversationId: 'x', conversationName: '研究员', role: m.role, memberName: m.name, text: m.text, time: m.time }; }),
+      window.__DSH_PREVIEW__.messages.group.map(function (m) { return { id: m.id, kind: 'group', conversationId: 'room-demo', conversationName: '项目例会', role: m.role, memberName: m.name, text: m.text, time: m.time }; }));
+    var hits = all.filter(function (h) { return h.text.indexOf(q) >= 0; });
+    data = { ok: true, total: hits.length, hits: hits };
+  }
   else if (u.indexOf('/api/team-workbench/chats') === 0) data = window.__DSH_PREVIEW__.chats;
   else data = window.__DSH_PREVIEW__.state;
   return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });

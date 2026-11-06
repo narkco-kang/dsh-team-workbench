@@ -28,6 +28,7 @@ const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
 const GROUP_ROUTE = ROUTE_BASE + '/chats/group'
 const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
+const SEARCH_ROUTE = ROUTE_BASE + '/chats/search'
 
 const CHAT_VERSION = 1
 const MAX_MESSAGES = 200
@@ -299,6 +300,48 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   return { messages: target.messages, turns, responder, pickedId }
 }
 
+/** 聊天记录检索：按关键词搜私聊与群聊，可按会话过滤。 */
+export async function searchMessages(query, kind, scopeId, limit) {
+  const needle = String(query || '').trim().toLowerCase()
+  if (needle.length === 0) return { total: 0, hits: [] }
+  const chats = await loadChats()
+  const store = await loadStore()
+  const memberById = new Map(store.members.map((member) => [member.id, member]))
+  const hits = []
+  const scan = (messages, chatKind, conversationId, conversationName) => {
+    for (const message of Array.isArray(messages) ? messages : []) {
+      if (typeof message.text !== 'string' || message.text.length === 0) continue
+      if (!message.text.toLowerCase().includes(needle)) continue
+      hits.push({
+        id: message.id,
+        kind: chatKind,
+        conversationId,
+        conversationName,
+        role: message.role,
+        memberId: message.memberId || '',
+        memberName: message.name || (message.role === 'user' ? '用户' : ''),
+        text: message.text,
+        time: message.time || ''
+      })
+    }
+  }
+  for (const [memberId, thread] of Object.entries(chats.private)) {
+    const member = memberById.get(memberId)
+    if (member === undefined) continue
+    if (kind === 'group') continue
+    if (scopeId.length > 0 && scopeId !== memberId) continue
+    scan(thread.messages, 'private', memberId, member.name)
+  }
+  for (const room of chats.rooms) {
+    if (kind === 'private') continue
+    if (scopeId.length > 0 && scopeId !== room.id) continue
+    scan(room.messages, 'group', room.id, room.name)
+  }
+  hits.sort((a, b) => String(b.time).localeCompare(String(a.time)))
+  const size = Math.min(200, Math.max(1, Number(limit) || 60))
+  return { total: hits.length, hits: hits.slice(0, size) }
+}
+
 /** 面板需要的会话概览。 */
 export async function chatOverview(ctx) {
   const store = await loadStore()
@@ -480,6 +523,26 @@ export function apply(ctx) {
         const room = chats.rooms.find((entry) => entry.id === id)
         if (room === undefined) return json({ ok: false, error: '找不到该群聊' }, 404)
         return json({ ok: true, room, messages: Array.isArray(room.messages) ? room.messages : [] })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: SEARCH_ROUTE,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const url = new URL(request.url)
+        const result = await searchMessages(
+          url.searchParams.get('q') || '',
+          url.searchParams.get('kind') || '',
+          url.searchParams.get('id') || '',
+          Number(url.searchParams.get('limit') || 60)
+        )
+        return json({ ok: true, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }

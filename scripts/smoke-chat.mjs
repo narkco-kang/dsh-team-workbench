@@ -116,6 +116,11 @@ await call('/api/team-workbench/chats/rooms', { action: 'update', id: roomId, ro
 const shallow = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '再确认一下范围' })
 check('lead 房 relayDepth=0 不再转发 @', shallow.turns.length === 1 && shallow.turns[0].name === architect.name, String(shallow.turns && shallow.turns.length))
 
+const search = await call('/api/team-workbench/chats/search?q=' + encodeURIComponent('两天') + '&kind=group')
+check('聊天记录检索命中群消息', search.ok === true && search.total > 0 && search.hits.every((h) => h.kind === 'group'), search.total + ' 条')
+const searchPrivate = await call('/api/team-workbench/chats/search?q=' + encodeURIComponent('你好') + '&kind=private')
+check('私聊检索可按 kind 过滤', searchPrivate.ok === true && searchPrivate.hits.length > 0 && searchPrivate.hits.every((h) => h.kind === 'private'), searchPrivate.total + ' 条')
+
 const toolNames = tools.map((t) => t.name)
 check('注册了 agent_team_chat 与 agent_team_group_chat', toolNames.includes('agent_team_chat') && toolNames.includes('agent_team_group_chat'), toolNames.join(','))
 const chatTool = tools.find((t) => t.name === 'agent_team_chat')
