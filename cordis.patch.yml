@@ -1,0 +1,11 @@
+# dsh-team-workbench bundle patch
+#
+# 这是本包的 dsh.bundle.patch 层。通过官方 CLI 安装时：
+#
+#   DSH_HOME=<harness> dsh plugin --profile web add <本目录>
+#
+# 命令会把包名追加进 dsh.profile.bundles；profile 启动时合并本补丁，挂载服务端半体。
+# 客户端半体由 package.json 的 dsh.client 声明进入 boot graph。
+- insert:
+    - id: team-workbench
+      name: 'dsh-team-workbench'

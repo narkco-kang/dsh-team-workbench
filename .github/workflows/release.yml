@@ -1,0 +1,35 @@
+name: release
+
+# 打 tag（v*）时构建发布产物并挂到 GitHub Release。
+# 市场按 github-release 分发时，release 资产必须与 entry.version 一致。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 版本一致性（package.json / changelog / tag）
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG package=$PKG"
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag 与 package.json version 不一致"; exit 1; }
+      - name: 冒烟测试（服务端 + 客户端）
+        run: |
+          node scripts/smoke-server.mjs
+          node scripts/smoke-client.mjs
+      - name: 打包
+        run: npm pack
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" ./*.tgz --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md

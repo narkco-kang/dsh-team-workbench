@@ -1,0 +1,47 @@
+{
+  "name": "dsh-team-workbench",
+  "version": "1.1.0",
+  "description": "智能体团队 · 技能管理工作台：17 名具名智能体（每人专属表情与配色、一组可回退模型路由），以及本机共享技能库的增删改查与派发；面向 DSH Desktop 原生工作台面板，兼容 DSH 0.2.2。",
+  "type": "module",
+  "main": "./dsh/index.js",
+  "exports": {
+    ".": "./dsh/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "dsh-desktop-workbenches"
+      ]
+    }
+  },
+  "files": [
+    "dsh",
+    "lib",
+    "scripts",
+    "market",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "author": "wenkangzhong",
+  "keywords": [
+    "dsh",
+    "dsh-desktop",
+    "workbench",
+    "agent-team",
+    "skills"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/narkco-kang/dsh-team-workbench.git"
+  },
+  "homepage": "https://github.com/narkco-kang/dsh-team-workbench#readme"
+}
