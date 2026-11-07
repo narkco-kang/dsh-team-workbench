@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.70.0'
+const PLUGIN_VERSION = '2.70.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -831,8 +831,69 @@ const MEMBER_SCHEMA = {
     enabled: { type: 'boolean' },
     createdAt: { type: 'string' },
     activeRouteId: { type: 'string', description: '当前使用的模型路由 id；空串表示继承主智能体。' },
-    routes: { type: 'array', description: '该智能体的模型路由列表。', items: ROUTE_SCHEMA }
+    routes: { type: 'array', description: '该智能体的模型路由列表。', items: ROUTE_SCHEMA },
+    // 部门成员会带这个字段（普通成员为 null）。schema 是 additionalProperties:false，
+    // 漏声明会让 agent_team_roster 整体校验失败、名册读不出来。
+    department: {
+      type: ['object', 'null'],
+      description: '部门子智能体（部门成员才有；普通成员为 null）。',
+      properties: {
+        name: { type: 'string' },
+        subAgents: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'name', 'role', 'emoji', 'provider', 'model', 'reasoningEffort', 'roleRef'],
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              role: { type: 'string' },
+              emoji: { type: 'string' },
+              provider: { type: 'string' },
+              model: { type: 'string' },
+              reasoningEffort: { type: 'string' },
+              roleRef: ROLE_REF_SCHEMA
+            }
+          }
+        }
+      }
+    }
   }
+}
+
+/** 把部门子智能体包装成一次可派发的虚拟成员（让它能被 agent_team_dispatch 直接点名）。 */
+function subAgentAsMember(owner, sub, index) {
+  const route = sub.provider.length > 0 && sub.model.length > 0
+    ? [{ id: 'sub-route-' + String(index), label: '子智能体路由', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
+    : []
+  return {
+    id: sub.id,
+    name: sub.name,
+    role: sub.role.length > 0 ? sub.role : ('部门「' + owner.name + '」的子智能体'),
+    emoji: sub.emoji,
+    color: owner.color,
+    groupId: owner.groupId,
+    avatar: { kind: 'emoji', imageId: '' },
+    roleRef: sub.roleRef,
+    instructions: '',
+    enabled: owner.enabled,
+    createdAt: owner.createdAt,
+    activeRouteId: route.length > 0 ? route[0].id : '',
+    routes: route
+  }
+}
+
+/** 按名字找成员：先找普通成员，再找部门子智能体（返回虚拟成员 + 所属部门）。 */
+function findDispatchable(store, name) {
+  const direct = store.members.find((entry) => entry.name === name)
+  if (direct !== undefined) return { member: direct, owner: null }
+  for (const owner of store.members) {
+    if (owner.department === null || owner.department === undefined) continue
+    const index = owner.department.subAgents.findIndex((sub) => sub.name === name)
+    if (index >= 0) return { member: subAgentAsMember(owner, owner.department.subAgents[index], index), owner }
+  }
+  return null
 }
 
 
@@ -937,11 +998,14 @@ function registerTools(ctx) {
       if (requested.length === 0) throw new Error('必须提供团队成员名字')
       if (task.length === 0) throw new Error('必须提供任务说明')
       const store = await loadStore()
-      const member = store.members.find((entry) => entry.name === requested)
-      if (member === undefined) {
+      const found = findDispatchable(store, requested)
+      if (found === null) {
         const known = store.members.map((entry) => entry.name).join('、')
-        throw new Error('名册中没有名为「' + requested + '」的成员。现有成员：' + (known.length > 0 ? known : '（空）'))
+        const subs = store.members.flatMap((entry) => (entry.department === null || entry.department === undefined) ? [] : entry.department.subAgents.map((sub) => sub.name))
+        const subText = subs.length > 0 ? '；部门子智能体：' + subs.join('、') : ''
+        throw new Error('名册中没有名为「' + requested + '」的成员。现有成员：' + (known.length > 0 ? known : '（空）') + subText)
       }
+      const member = found.member
       if (!member.enabled) throw new Error('成员「' + requested + '」已停用，请先在侧边栏启用')
       const result = await runAnyMember(ctx, parent, member, task, exec?.signal)
       return {
@@ -1081,7 +1145,10 @@ function registerTools(ctx) {
       if (hasProducer === hasDraft) throw new Error('producer 与 draft 必须且只能提供一个')
 
       const store = await loadStore()
-      const byName = (n) => store.members.find((entry) => entry.name === n)
+      const byName = (n) => {
+        const found = findDispatchable(store, n)
+        return found === null ? undefined : found.member
+      }
       // 先按固定名字找；找不到再按职责关键词兜底，这样「项目部」预设
       // （质量审核员 / 交付复核员）不必为了关卡改名。
       const byRole = (pattern) => store.members.find((entry) => entry.enabled && (pattern.test(entry.role) || pattern.test(entry.name)))

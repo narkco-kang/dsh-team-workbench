@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.70.1 — 2026-11-08
+
+- 修 agent_team_roster 输出 schema：补 `department`（含 subAgents 子结构），否则 additionalProperties:false 让整个名册工具校验失败；
+- `agent_team_dispatch` / `agent_team_task` 现在能按**部门子智能体名字**派发（虚拟成员包装：继承 name/role/emoji/角色引用与它自己的 provider/model）；
+- 找不到人时的报错会同时列出部门子智能体名单；
+- 隔离环境实测：dispatch 到「反馈分析师」→ completed，输出非空。
+
 ## 2.70.0 — 2026-11-08
 
 - 消息操作条（对齐 DSH 截图）：⧉ 复制、👍/👎 反馈、↗ 引用到输入框、`用量 N tok`（按字数估算）、时间；
