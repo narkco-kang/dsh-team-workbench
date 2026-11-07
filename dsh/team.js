@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.57.0'
+const PLUGIN_VERSION = '2.58.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1762,6 +1762,40 @@ export function apply(ctx, config) {
       const body = await readJson(request)
       if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
       try {
+        // 真实推理探测：用宿主会话跑一次极小任务，验证模型真的能出字（不只是配置可解析）。
+        if (text(body.action) === 'live') {
+          const provider = text(body.provider)
+          const model = text(body.model)
+          if (provider.length === 0 || model.length === 0) return json({ ok: false, error: '缺少 provider/model' }, 400)
+          const agents = ctx.get('agents')
+          const sessionId = text(body.sessionId)
+          const parent = agents !== undefined && agents !== null && sessionId.length > 0 ? agents.get(sessionId) : undefined
+          if (parent === undefined || parent === null) return json({ ok: false, error: '当前没有活动的会话，无法做真实推理探测（请先打开一次聊天）' }, 409)
+          const probeMember = {
+            id: 'probe-' + provider + '-' + model,
+            name: '模型探测',
+            role: '连通性探测',
+            emoji: '🔌',
+            color: '',
+            groupId: '',
+            avatar: { kind: 'emoji', imageId: '' },
+            roleRef: { library: '', id: '', version: '' },
+            instructions: '',
+            enabled: true,
+            createdAt: new Date().toISOString(),
+            activeRouteId: 'probe-route',
+            routes: [{ id: 'probe-route', label: '探测', provider, model, reasoningEffort: text(body.reasoningEffort), enabled: true }]
+          }
+          const started = Date.now()
+          try {
+            const result = await dispatchToMember(ctx, parent, probeMember, '只回复两个字符：ok。不要解释，不要标点。', request.signal)
+            const output = text(result.output).slice(0, 40)
+            const ok = result.stopReason === 'completed' && output.length > 0
+            return json({ ok, provider, model, output, stopReason: result.stopReason, ms: Date.now() - started, error: ok ? '' : text(result.detail).slice(0, 300) })
+          } catch (error) {
+            return json({ ok: false, provider, model, ms: Date.now() - started, error: String(error && error.message ? error.message : error).slice(0, 300) })
+          }
+        }
         const store = await loadStore()
         const member = store.members.find((m) => m.id === text(body.memberId))
         let route

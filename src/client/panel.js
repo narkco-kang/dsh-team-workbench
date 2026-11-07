@@ -1281,40 +1281,73 @@ window.__ModuleLoader__.load({
       var probeAll = probeAllState[0];
       var setProbeAll = probeAllState[1];
       var checkAllModels = function () {
-        setProbeAll({ busy: true, report: "检测中…" });
-        var members = (snap.members || []).filter(function (m) { return (m.routes || []).length > 0; });
+        setProbeAll({ busy: true, report: "真实推理检测中…（每个模型发一句 ok）" });
+        var unique = new Map();
+        (snap.members || []).forEach(function (m) {
+          (m.routes || []).forEach(function (r) {
+            if (!r.provider || !r.model) return;
+            var key = r.provider + "|" + r.model + "|" + (r.reasoningEffort || "");
+            if (!unique.has(key)) unique.set(key, { provider: r.provider, model: r.model, reasoningEffort: r.reasoningEffort || "", routes: [], subs: [] });
+            unique.get(key).routes.push({ memberId: m.id, routeId: r.id, label: m.name });
+          });
+          ((m.department && m.department.subAgents) || []).forEach(function (s) {
+            if (!s.provider || !s.model) return;
+            var key = s.provider + "|" + s.model + "|" + (s.reasoningEffort || "");
+            if (!unique.has(key)) unique.set(key, { provider: s.provider, model: s.model, reasoningEffort: s.reasoningEffort || "", routes: [], subs: [] });
+            unique.get(key).subs.push({ memberId: m.id, subId: s.id, label: m.name + " / " + s.name });
+          });
+        });
+        var entries = Array.from(unique.values());
+        if (entries.length === 0) { setProbeAll({ busy: false, report: "团队里没有配置模型。" }); return; }
         var bad = [];
-        var good = 0;
-        var run = function (mi, ri) {
-          if (mi >= members.length) {
-            var deletes = bad.map(function (item) {
-              return fetch("/api/team-workbench/members", {
-                method: "POST", headers: { "content-type": "application/json" },
-                body: JSON.stringify({ action: "route-delete", memberId: item.memberId, routeId: item.routeId })
-              }).then(function (res) { return res.json(); });
+        var good = [];
+        var run = function (index) {
+          if (index >= entries.length) {
+            var tasks = [];
+            bad.forEach(function (entry) {
+              entry.routes.forEach(function (r) {
+                tasks.push(fetch("/api/team-workbench/members", {
+                  method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ action: "route-delete", memberId: r.memberId, routeId: r.routeId })
+                }));
+              });
+              entry.subs.forEach(function (s) {
+                var owner = (snap.members || []).filter(function (m) { return m.id === s.memberId; })[0];
+                if (owner === undefined || owner.department === null || owner.department === undefined) return;
+                var subs = owner.department.subAgents.map(function (sub) {
+                  return sub.id === s.subId ? Object.assign({}, sub, { provider: "", model: "" }) : sub;
+                });
+                tasks.push(fetch("/api/team-workbench/members", {
+                  method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ action: "upsert", member: { id: owner.id, department: { name: owner.department.name, subAgents: subs } } })
+                }));
+              });
             });
-            return Promise.all(deletes).then(function () {
-              setProbeAll({ busy: false, report: "检测完成：" + String(good) + " 条可用" + (bad.length > 0 ? "，" + String(bad.length) + " 条已删除（" + bad.map(function (b) { return b.label + "：" + b.error; }).join("；") + "）" : "，没有失效路由") });
+            return Promise.all(tasks).then(function () {
+              var lines = ["真实推理检测：" + String(good.length) + " 个模型可用"];
+              if (bad.length > 0) {
+                lines.push(String(bad.length) + " 个不可用，已清理（成员路由删除 / 子智能体模型置空）");
+                bad.forEach(function (entry) { lines.push("· " + entry.provider + "/" + entry.model + " → " + String(entry.error || "无输出").slice(0, 120)); });
+              }
+              setProbeAll({ busy: false, report: lines.join("\n") });
               load();
             });
           }
-          var member = members[mi];
-          var routes = member.routes || [];
-          if (ri >= routes.length) return run(mi + 1, 0);
-          var route = routes[ri];
+          var entry = entries[index];
           return fetch("/api/team-workbench/probe", {
             method: "POST", headers: { "content-type": "application/json" },
-            body: JSON.stringify({ memberId: member.id, routeId: route.id })
+            body: JSON.stringify({ action: "live", sessionId: sessionId, provider: entry.provider, model: entry.model, reasoningEffort: entry.reasoningEffort })
           }).then(function (res) { return res.json(); }).then(function (payload) {
-            if (payload.ok === true) good += 1;
-            else bad.push({ memberId: member.id, routeId: route.id, label: member.name + " · " + route.provider + "/" + route.model, error: String(payload.error || "不可用") });
-            return run(mi, ri + 1);
+            if (payload.ok === true) good.push(entry);
+            else { entry.error = String(payload.error || payload.stopReason || "不可用"); bad.push(entry); }
+            return run(index + 1);
           }).catch(function (error) {
-            bad.push({ memberId: member.id, routeId: route.id, label: member.name + " · " + route.provider + "/" + route.model, error: String(error && error.message ? error.message : error) });
-            return run(mi, ri + 1);
+            entry.error = String(error && error.message ? error.message : error);
+            bad.push(entry);
+            return run(index + 1);
           });
         };
-        run(0, 0).catch(function (error) { setProbeAll({ busy: false, report: "检测失败：" + String(error && error.message ? error.message : error) }); });
+        run(0).catch(function (error) { setProbeAll({ busy: false, report: "检测失败：" + String(error && error.message ? error.message : error) }); });
       };
       var mergeState = useState({ open: false, busy: "", error: "" });
       var merge = mergeState[0];
