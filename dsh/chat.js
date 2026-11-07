@@ -150,9 +150,21 @@ function transcript(messages, selfName) {
   return recent.map((m) => (m.role === 'user' ? '用户：' : (m.name || selfName) + '：') + m.text).join('\n')
 }
 
-function privatePrompt(member, messages, userText, memoryText) {
+/**
+ * 聊天里只补一行「身份锚点」（名字 + 职责）。
+ * 完整工作要求已经由 runOnRoute 通过 persona 字段传给子智能体，这里再贴一遍是重复计费；
+ * 但有的路由（实测 mg/qwen3.8-max）会忽略 persona 字段，用提示词里的一行身份把它拉回来。
+ */
+function personaOf(member) {
+  const role = text(member.role).trim()
+  return '你的身份：「' + member.name + '」' + (role.length > 0 ? '，职责是：' + role + '。' : '。') +
+    '按这个职责回答，不要自称通用助手。'
+}
+
+export function privatePrompt(member, messages, userText, memoryText) {
   return [
     '【私聊】你在和用户一对一对话。',
+    personaOf(member),
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
@@ -184,10 +196,11 @@ function groupPreamble(room, members) {
   }
 }
 
-function adminPrompt(room, members, messages, userText, memoryText) {
+export function adminPrompt(room, members, messages, userText, memoryText) {
   const info = groupPreamble(room, members)
   return [
     ...info.lines,
+    info.admin ? personaOf(info.admin) : null,
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
@@ -202,10 +215,11 @@ function adminPrompt(room, members, messages, userText, memoryText) {
   ].join('\n')
 }
 
-function memberPrompt(room, member, members, messages, userText, asker, memoryText) {
+export function memberPrompt(room, member, members, messages, userText, asker, memoryText) {
   const info = groupPreamble(room, members)
   return [
     ...info.lines,
+    personaOf(member),
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
@@ -778,7 +792,10 @@ function registerChatTools(ctx) {
       if (parent === undefined || parent === null) throw new Error('agent_team_chat 需要一个调用方会话')
       const store = await loadStore()
       const member = store.members.find((entry) => entry.name === text(args?.member))
-      if (member === undefined) throw new Error('名册中没有名为「' + text(args?.member) + '」的成员')
+      if (member === undefined) {
+        const names = store.members.map((m) => m.name).slice(0, 30)
+        throw new Error('名册中没有名为「' + text(args?.member) + '」的成员。可用成员：' + (names.length > 0 ? names.join('、') : '（空）'))
+      }
       const result = await sendPrivate(ctx, parent, member, text(args?.message), exec?.signal)
       const last = result.messages[result.messages.length - 1]
       return { member: member.name, reply: last ? last.text : '', stopReason: last ? (last.stopReason || '') : '' }
