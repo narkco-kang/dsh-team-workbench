@@ -3672,6 +3672,17 @@ window.__ModuleLoader__.load({
       ".tw-root{--dsh-surface:#ffffff;--dsh-text-primary:#111111;--dsh-text-secondary:#555b63;--dsh-border:#dcdfe4;--dsh-accent:#2563eb;--dsh-input-bg:#ffffff;display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;background:#ffffff;color:#111111;}",
       ".tw-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #dcdfe4;flex:0 0 auto;flex-wrap:wrap;background:#f5f6f8;}",
       ".tw-tabs{display:flex;gap:4px;flex:1 1 auto;min-width:0;overflow:auto;}",
+      ".tw-tour{position:fixed;inset:0;z-index:99999;pointer-events:none;}",
+      ".tw-tour-mask{position:fixed;inset:0;background:rgba(15,23,42,.42);pointer-events:auto;}",
+      ".tw-tour-hole{position:fixed;border-radius:12px;box-shadow:0 0 0 9999px rgba(15,23,42,.42),0 0 0 3px rgba(255,255,255,.9) inset;pointer-events:none;transition:all .18s ease;}",
+      ".tw-tour-card{position:fixed;max-width:320px;background:var(--bt-bg,#fff);color:var(--bt-ink,#111);border-radius:14px;padding:14px 16px;box-shadow:0 18px 46px -12px rgba(15,23,42,.5),0 0 0 1px rgba(15,23,42,.08);pointer-events:auto;}",
+      ".tw-tour-card h4{margin:0 0 6px;font-size:14px;}",
+      ".tw-tour-card p{margin:0 0 10px;font-size:12.5px;line-height:1.65;opacity:.85;}",
+      ".tw-tour-foot{display:flex;align-items:center;gap:6px;}",
+      ".tw-tour-step{font-size:11px;opacity:.6;flex:1 1 auto;}",
+      ".tw-tour-btn{font:inherit;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--bt-line);background:transparent;cursor:pointer;}",
+      ".tw-tour-btn.primary{background:var(--bt-accent,#2563eb);border-color:var(--bt-accent,#2563eb);color:#fff;}",
+      ".tw-tour-close{position:absolute;top:8px;right:10px;border:0;background:transparent;font-size:14px;cursor:pointer;opacity:.5;}",
       ".tw-tab{font:inherit;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid #dcdfe4;background:#eef0f3;color:#111111;cursor:pointer;white-space:nowrap;}",
       ".tw-tab{min-width:44px;height:36px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;}",
       ".tw-tab .tw-tab-icon{font-size:19px;line-height:1;display:inline-flex;align-items:center;}",
@@ -3714,6 +3725,66 @@ window.__ModuleLoader__.load({
       function pick(id) {
         setTab(function (prev) { return prev === id ? prev : (writeTab(id), id); });
       }
+
+      // —— 新手引导：10 步，按标签自动切换 + 聚光灯指向真实控件 ——
+      var TOUR_STEPS = [
+        { title: "欢迎使用智能体团队", text: "这是一个 DSH 网页客户端插件：把一支具名智能体团队做成聊天应用。10 步带你走完核心功能，随时可按右上角 ? 重看。", center: true },
+        { tab: "chat", selector: ".bt-people", title: "侧栏：成员与部门", text: "每个成员只显示职称 + 3D 头像（点头像进属性页增删改查）。同一部门的子智能体自动收成「🏢 部门名」一格，点开看部门内成员。🗑 是批量删除。" },
+        { tab: "chat", selector: ".ats-im-form", title: "输入框与思考状态", text: "底部常驻输入框；发送后上方会显示「谁在思考 / 正在做什么 / 已第几棒 / 排队几位」。Enter 发送，Shift+Enter 换行，⌘Enter 也能发。" },
+        { tab: "chat", selector: "button[data-tip='长期记忆']", title: "记忆入口", text: "会话头 🧠 打开这段会话的长期记忆：L1 原子事实、L2 摘要、L3 用户画像都可逐条查看与删除。" },
+        { tab: "team", selector: ".ats-hero", title: "团队页：成员与模型", text: "这里是成员卡片：每个成员有一组可回退的模型路由，点 ✏️ 编辑，▶ 试跑会显示回退轨迹。" },
+        { tab: "team", selector: ".ats-hero", title: "部门一键整理", text: "🧩 把同部门的多个成员合并成一个「🏢 部门智能体」：子智能体保留、私聊历史合并、群引用去重。" },
+        { tab: "roles", selector: ".ats-cat", title: "角色库：313 个角色", text: "按部门筛选后可「＋ 作为部门加入」：整个部门只占 1 个成员，内部角色变成子智能体，各自配模型。" },
+        { tab: "records", selector: ".ats-search", title: "记录检索", text: "跨私聊/群聊搜索，命中词标黄，结果按「今天 / 昨天 / 更早」分组，点一条回到那段对话。" },
+        { tab: "chat", selector: "button[data-tip='语音识别设置']", title: "语音与模型校对", text: "🎤 打开语音设置：本地 stt / OpenAI 兼容 / 智谱 GLM-ASR / MiniMax；可选模型校对（术语表纠错，防改写）。" },
+        { title: "可以开始了", text: "建议先做三件事：① 团队页「项目部预设」建一支队伍；② 每个成员配一条模型路由；③ 回聊天页发第一句。随时点右上角 ? 重看引导。", center: true }
+      ];
+      var tourState = useState({ on: false, step: 0, rect: null });
+      var tour = tourState[0];
+      var setTour = tourState[1];
+      var openTour = function () { setTour({ on: true, step: 0, rect: null }); };
+      var closeTour = function (done) {
+        setTour({ on: false, step: 0, rect: null });
+        if (done) { try { window.localStorage.setItem("team-workbench:tour-v1", "done"); } catch { /* 隐私模式忽略 */ } }
+      };
+      var gotoStep = function (next) {
+        if (next < 0) { setTour({ on: true, step: 0, rect: null }); return; }
+        if (next >= TOUR_STEPS.length) { closeTour(true); return; }
+        setTour({ on: true, step: next, rect: null });
+      };
+      useEffect(function () {
+        if (!tour.on) return undefined;
+        var step = TOUR_STEPS[tour.step];
+        if (step.tab !== undefined) pick(step.tab);
+        var measure = function () {
+          var node = step.selector === undefined ? null : document.querySelector(step.selector);
+          if (node === null) { setTour(function (prev) { return Object.assign({}, prev, { rect: null }); }); return; }
+          var rect = node.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) { setTour(function (prev) { return Object.assign({}, prev, { rect: null }); }); return; }
+          setTour(function (prev) { return Object.assign({}, prev, { rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height } }); });
+        };
+        var timer = setTimeout(measure, 260);
+        window.addEventListener("resize", measure);
+        window.addEventListener("scroll", measure, true);
+        return function () { clearTimeout(timer); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+      }, [tour.on, tour.step]);
+      useEffect(function () {
+        var done = null;
+        try { done = window.localStorage.getItem("team-workbench:tour-v1"); } catch { done = null; }
+        if (done !== null) return undefined;
+        var timer = setTimeout(function () { setTour({ on: true, step: 0, rect: null }); }, 1200);
+        return function () { clearTimeout(timer); };
+      }, []);
+      useEffect(function () {
+        if (!tour.on) return undefined;
+        var onKey = function (e) {
+          if (e.key === "Escape") closeTour(false);
+          else if (e.key === "ArrowRight") gotoStep(tour.step + 1);
+          else if (e.key === "ArrowLeft") gotoStep(tour.step - 1);
+        };
+        window.addEventListener("keydown", onKey);
+        return function () { window.removeEventListener("keydown", onKey); };
+      }, [tour.on, tour.step]);
 
       // 全局快捷键：⌘1..6 切标签，/ 聚焦搜索（不在输入框里时）。
       useEffect(function () {
@@ -3762,6 +3833,38 @@ window.__ModuleLoader__.load({
       else if (tab === "roles") body = h(RoleLibrary, { onTeamChanged: function () { pick("team"); } });
       else body = h(SkillManager);
 
+      var tourStep = tour.on ? TOUR_STEPS[tour.step] : null;
+      var tourCardStyle = (function () {
+        if (tourStep === null) return {};
+        var rect = tour.rect;
+        if (rect === null) return { left: "50%", top: "50%", transform: "translate(-50%,-50%)" };
+        var width = 320;
+        var left = Math.max(16, Math.min(window.innerWidth - width - 16, rect.x + rect.w / 2 - width / 2));
+        var below = rect.y + rect.h + 14;
+        var cardTop = below + 180 < window.innerHeight ? below : Math.max(16, rect.y - 190);
+        return { left: String(left) + "px", top: String(cardTop) + "px" };
+      })();
+      var tourOverlay = tourStep === null ? null : h("div", { className: "tw-tour" },
+        tour.rect === null ? h("div", { className: "tw-tour-mask", onClick: function () { closeTour(false); } }) : null,
+        tour.rect === null ? null : h("div", {
+          className: "tw-tour-hole",
+          style: {
+            left: String(tour.rect.x - 6) + "px", top: String(tour.rect.y - 6) + "px",
+            width: String(tour.rect.w + 12) + "px", height: String(tour.rect.h + 12) + "px"
+          }
+        }),
+        h("div", { className: "tw-tour-card", style: tourCardStyle },
+          h("button", { className: "tw-tour-close", type: "button", "aria-label": "关闭引导", onClick: function () { closeTour(false); } }, "✕"),
+          h("h4", null, tourStep.title),
+          h("p", null, tourStep.text),
+          h("div", { className: "tw-tour-foot" },
+            h("span", { className: "tw-tour-step" }, String(tour.step + 1) + " / " + String(TOUR_STEPS.length)),
+            h("button", { className: "tw-tour-btn", type: "button", onClick: function () { gotoStep(tour.step - 1); } }, "上一步"),
+            h("button", { className: "tw-tour-btn primary", type: "button", onClick: function () { gotoStep(tour.step + 1); } }, tour.step === TOUR_STEPS.length - 1 ? "完成" : "下一步")
+          )
+        )
+      );
+
       return h("div", { className: "tw-root" },
         h("header", { className: "tw-head" },
           h("div", { className: "tw-brand" },
@@ -3776,12 +3879,17 @@ window.__ModuleLoader__.load({
             tabBtn("roles", "角色库", "🧩"),
             tabBtn("skills", "技能库", "🛠️")
           ),
+          h("button", {
+            className: "tw-tab", type: "button", title: "新手引导", "aria-label": "新手引导",
+            style: { flex: "0 0 auto" }, onClick: openTour
+          }, "?"),
           sessionId ? h("span", { className: "tw-session" }, "会话 " + sessionId.slice(0, 12)) : null
         ),
         h("div", { className: "tw-body" },
           // 只挂载当前标签：切走后另一块整体卸载，不保留后台定时器/请求。
           body
-        )
+        ),
+        tourOverlay
       );
     }
 

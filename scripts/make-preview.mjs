@@ -18,6 +18,15 @@ const pick = (name) => {
   return ''
 }
 const members = team.members.map((m) => Object.assign({}, m, { groupId: pick(m.name), avatar: { kind: 'emoji', imageId: '' }, roleRef: { library: '', id: '', version: '' } }))
+// 真实团队被合并到只剩 1–3 人时，用预设角色补到至少 4 人，预览脚本本身不依赖用户数据规模。
+while (members.length < 4) {
+  const seed = preset.members[members.length % preset.members.length]
+  members.push({
+    id: 'pad-' + String(members.length), name: seed.name, role: seed.role, emoji: seed.emoji, color: seed.color,
+    groupId: '', avatar: { kind: 'emoji', imageId: '' }, roleRef: { library: '', id: '', version: '' },
+    instructions: '', enabled: true, createdAt: new Date().toISOString(), activeRouteId: '', routes: []
+  })
+}
 
 const state = {
   ok: true,
