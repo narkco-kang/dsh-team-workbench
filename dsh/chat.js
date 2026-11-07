@@ -672,6 +672,11 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         const found = target.progress.steps.find((entry) => entry.name === name && entry.phase === 'thinking')
         if (found !== undefined) { found.phase = patch && patch.ok === false ? 'failed' : 'done'; found.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0 }
         await persist()
+      },
+      // 子智能体产出即刻进群（DS-Bot 的观感，但没有它 7 次串行的代价）。
+      onSubResult: async (sub, text) => {
+        pushMessage(target.messages, messageOf('agent', { id: 'sub:' + sub.id, name: sub.name, emoji: '🧩' }, text))
+        await persist()
       }
     }
     const raw = await runMember(ctx, parent, member, prompt, signal, liveOptions)
