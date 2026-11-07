@@ -203,6 +203,7 @@ window.__ModuleLoader__.load({
       ".dta-spacer{flex:1 1 auto;}",
       ".dta-btn{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;cursor:pointer;}",
       ".dta-body{flex:1 1 auto;min-height:0;display:flex;}",
+      ".dta-body>.tw-root{flex:1 1 auto;min-width:0;width:100%;}",
       ".dta-launcher{position:fixed;right:16px;bottom:16px;z-index:2147483000;font:inherit;font-size:12px;padding:8px 14px;border-radius:999px;border:1px solid rgba(127,127,127,.35);background:var(--dsh-accent,#2563eb);color:#fff;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.25);}",
       ".ats-chat-body{display:flex;flex:1 1 auto;min-height:0;}",
       ".ats-search-results{display:flex;flex-direction:column;gap:8px;}",
