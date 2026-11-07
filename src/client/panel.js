@@ -700,26 +700,26 @@ window.__ModuleLoader__.load({
             h("ellipse", { cx: 32, cy: 52, rx: 14, ry: 5.5, fill: "#0b1220", opacity: 0.2, filter: "url(#gloss-" + gradientId + ")" }),
             // 底部反光：球体下沿被桌面反弹的光提亮，仰视时最明显。
             h("ellipse", { cx: 32, cy: 62, rx: 21, ry: 10, fill: "#ffffff", opacity: 0.2, filter: "url(#gloss-" + gradientId + ")" }),
-            // 脸朝左转，右侧就是“背面”，压一层暗让球转过去。
-            h("ellipse", { cx: 52, cy: 40, rx: 12, ry: 18, fill: "#0b1220", opacity: 0.14, filter: "url(#gloss-" + gradientId + ")" })
+            // 脸朝右转，左侧就是“背面”，压一层暗让球转过去。
+            h("ellipse", { cx: 12, cy: 40, rx: 12, ry: 18, fill: "#0b1220", opacity: 0.14, filter: "url(#gloss-" + gradientId + ")" })
           ),
           // 地面接触阴影：像物体立在台面上，被 45° 视角看到。
           h("ellipse", { cx: 32, cy: 61.2, rx: 14.5, ry: 2.8, fill: "#0b1220", opacity: 0.2, filter: "url(#gloss-" + gradientId + ")" }),
           state === "working"
             ? h("circle", { className: "ats-mascot-ring", cx: 32, cy: 33, r: 27, fill: "none", stroke: "#fbbf24", strokeWidth: 2.4, strokeDasharray: "7 9", strokeLinecap: "round" })
             : null,
-          // 脸只长在球的一面：这一面朝左转（近侧眼大、远侧眼小、整体左移），同时仰头向上 45°（五官整体上移）。
-          h("g", { transform: "translate(-5 -3.2) rotate(-5 33 42)" },
+          // 脸只长在球的一面：这一面朝右转（近侧右眼大、远侧左眼小、整体右移），同时仰头向上 45°（五官整体上移）。
+          h("g", { transform: "translate(5 -3.2) rotate(5 33 42)" },
             h("g", { className: "ats-mascot-eyes" },
-              h("ellipse", { cx: leftX, cy: 31.4, rx: eyeRx * 1.06, ry: eyeRy, fill: "#fff" }),
-              h("ellipse", { cx: rightX - 0.8, cy: 31.4, rx: eyeRx * 0.9, ry: eyeRy * 0.96, fill: "#fff" }),
-              h("circle", { cx: leftX + 1.2, cy: 30.4, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
-              h("circle", { cx: rightX + 0.1, cy: 30.4, r: narrow ? 2.2 : 2.9, fill: "#1f2937" }),
-              h("circle", { cx: leftX + 2.1, cy: 29.3, r: 1.05, fill: "#fff" }),
-              h("circle", { cx: rightX + 0.9, cy: 29.3, r: 0.95, fill: "#fff" })
+              h("ellipse", { cx: leftX + 0.8, cy: 31.4, rx: eyeRx * 0.9, ry: eyeRy * 0.96, fill: "#fff" }),
+              h("ellipse", { cx: rightX, cy: 31.4, rx: eyeRx * 1.06, ry: eyeRy, fill: "#fff" }),
+              h("circle", { cx: leftX + 0.1, cy: 30.4, r: narrow ? 2.2 : 2.9, fill: "#1f2937" }),
+              h("circle", { cx: rightX + 1.6, cy: 30.4, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
+              h("circle", { cx: leftX + 0.9, cy: 29.3, r: 0.95, fill: "#fff" }),
+              h("circle", { cx: rightX + 2.5, cy: 29.3, r: 1.05, fill: "#fff" })
             ),
-            h("ellipse", { cx: narrow ? 21 : 19, cy: 42.4, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.3 }),
-            h("ellipse", { cx: narrow ? 43 : 45, cy: 42.4, rx: 3.4, ry: 2, fill: "#fb7185", opacity: 0.24 }),
+            h("ellipse", { cx: narrow ? 21 : 19, cy: 42.4, rx: 3.4, ry: 2, fill: "#fb7185", opacity: 0.24 }),
+            h("ellipse", { cx: narrow ? 43 : 45, cy: 42.4, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.3 }),
             mouthNode
           ),
           h("circle", { cx: 50, cy: 52, r: 7.6, fill: "#fff", opacity: 0.94 }),
