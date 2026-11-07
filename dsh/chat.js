@@ -466,11 +466,13 @@ async function runMember(ctx, parent, member, prompt, signal, options) {
         break
       }
       if (options !== undefined && typeof options.onSubStepEnd === 'function') await options.onSubStepEnd(endedName, patch).catch(() => undefined)
+      if (ticketId.length > 0 && assignmentId.length > 0) finishAssignment(assignmentId, patch)
     },
     onSubResult: async (sub, text) => {
       if (options !== undefined && typeof options.onSubResult === 'function') await options.onSubResult(sub, text).catch(() => undefined)
-      if (ticketId.length > 0 && assignmentId.length > 0) finishAssignment(assignmentId, patch)
-    }
+    },
+    // 群里是否要主管汇总（runDepartmentMember 读这个字段决定要不要再调一次模型）。
+    synthesize: options !== undefined && options.synthesize === true
   }
   const work = member.department !== null && member.department !== undefined && member.department.subAgents.length > 0
     ? runDepartmentMember(ctx, parent, member, prompt, signal, hooks)
