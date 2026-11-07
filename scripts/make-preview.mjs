@@ -146,6 +146,10 @@ window.fetch = function (url, init) {
     var hits = all.filter(function (h) { return h.text.indexOf(q) >= 0; });
     data = { ok: true, total: hits.length, hits: hits };
   }
+  else if (u.indexOf('/api/team-workbench/avatar-library') === 0) data = { ok: true, total: 2, items: [
+    { id: 'lib1', name: '示例一', dataUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#7c3aed"/><circle cx="32" cy="32" r="16" fill="#fff"/></svg>') },
+    { id: 'lib2', name: '示例二', dataUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#f97316"/><rect x="16" y="16" width="32" height="32" rx="8" fill="#fff"/></svg>') }
+  ] };
   else if (u.indexOf('/api/team-workbench/chats') === 0) data = window.__DSH_PREVIEW__.chats;
   else data = window.__DSH_PREVIEW__.state;
   return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });

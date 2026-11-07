@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -126,6 +126,48 @@ export async function saveAvatar(home, bytes, ext) {
   const id = createHash('sha256').update(bytes).digest('hex').slice(0, 32)
   await writeFile(join(dir, id + '.' + ext), bytes)
   return id
+}
+
+/** 头像库索引：id 去重，同一张图只存一份。 */
+export function avatarLibraryPath(home) {
+  return join(home, 'team-workbench', 'avatar-library.json')
+}
+
+export async function loadAvatarLibrary(home) {
+  try {
+    const parsed = JSON.parse(await readFile(avatarLibraryPath(home), 'utf8'))
+    const items = Array.isArray(parsed?.items) ? parsed.items : []
+    return items
+      .filter((item) => item !== null && typeof item === 'object' && typeof item.id === 'string')
+      .map((item) => ({ id: item.id, name: String(item.name || ''), bytes: Number(item.bytes) || 0, createdAt: String(item.createdAt || '') }))
+  } catch {
+    return []
+  }
+}
+
+async function saveAvatarLibrary(home, items) {
+  const dir = avatarDir(home)
+  await mkdir(dir, { recursive: true })
+  const target = avatarLibraryPath(home)
+  const temp = target + '.tmp-' + process.pid + '-' + Date.now()
+  await writeFile(temp, JSON.stringify({ version: 1, items }, null, 2), 'utf8')
+  await rename(temp, target)
+}
+
+/** 把一张头像登记进库（按 id 去重，最新的在前）。 */
+export async function addAvatarToLibrary(home, id, name, bytes) {
+  const items = await loadAvatarLibrary(home)
+  const next = items.filter((item) => item.id !== id)
+  next.unshift({ id, name: String(name || ''), bytes: Number(bytes) || 0, createdAt: new Date().toISOString() })
+  await saveAvatarLibrary(home, next)
+  return next
+}
+
+export async function removeAvatarFromLibrary(home, id) {
+  const items = await loadAvatarLibrary(home)
+  const next = items.filter((item) => item.id !== id)
+  await saveAvatarLibrary(home, next)
+  return next
 }
 
 /** 读取头像文件。 */

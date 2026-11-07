@@ -28,7 +28,10 @@ import {
   loadPreset,
   loadRoleBody,
   loadRoleIndex,
+  addAvatarToLibrary,
+  loadAvatarLibrary,
   readAvatar,
+  removeAvatarFromLibrary,
   saveAvatar,
   searchRoles
 } from './library.js'
@@ -57,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.44.0'
+const PLUGIN_VERSION = '2.45.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -70,6 +73,7 @@ const ROLES_ROUTE = ROUTE_BASE + '/roles'
 const ROLE_BODY_ROUTE = ROUTE_BASE + '/roles/body'
 const PRESET_ROUTE = ROUTE_BASE + '/preset'
 const AVATAR_ROUTE = ROUTE_BASE + '/avatar'
+const AVATAR_LIBRARY_ROUTE = ROUTE_BASE + '/avatar-library'
 const USAGE_ROUTE = ROUTE_BASE + '/usage'
 const BALANCE_ROUTE = ROUTE_BASE + '/balance'
 const BALANCE_KEY_ROUTE = ROUTE_BASE + '/balance/key'
@@ -1653,6 +1657,61 @@ export function apply(ctx, config) {
   }))
 
   own(ctx.connection.fetch.register({
+    path: AVATAR_LIBRARY_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'GET') {
+          const items = await loadAvatarLibrary(harnessHome())
+          return json({ ok: true, total: items.length, items: items.slice(0, 48) })
+        }
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const action = text(body.action)
+
+        if (action === 'import') {
+          const input = Array.isArray(body.items) ? body.items : []
+          const results = []
+          for (const entry of input.slice(0, 50)) {
+            const name = text(entry?.name).slice(0, 80)
+            const decoded = decodeImageDataUrl(entry?.dataUrl)
+            if (decoded === null) {
+              results.push({ ok: false, name, error: '只支持 png/jpeg/webp，单张 ≤400 KB' })
+              continue
+            }
+            const id = await saveAvatar(harnessHome(), decoded.bytes, decoded.ext)
+            await addAvatarToLibrary(harnessHome(), id, name, decoded.bytes.length)
+            results.push({ ok: true, id, name, bytes: decoded.bytes.length })
+          }
+          return json({ ok: true, results, items: (await loadAvatarLibrary(harnessHome())).slice(0, 48) })
+        }
+
+        if (action === 'delete') {
+          const items = await removeAvatarFromLibrary(harnessHome(), text(body.id))
+          return json({ ok: true, items: items.slice(0, 48) })
+        }
+
+        if (action === 'assign') {
+          const id = text(body.id).replace(/[^a-f0-9]/g, '')
+          const found = await readAvatar(harnessHome(), id)
+          if (found === null) return json({ ok: false, error: '库里没有这张图' }, 404)
+          const store = await loadStore()
+          const member = store.members.find((entry) => entry.id === text(body.memberId))
+          if (member === undefined) return json({ ok: false, error: '找不到该成员' }, 404)
+          member.avatar = { kind: 'image', imageId: id }
+          await saveStore(store)
+          return json(await snapshot())
+        }
+
+        return json({ ok: false, error: '未知的 action' }, 400)
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
     path: AVATAR_ROUTE,
     methods: ['GET', 'POST'],
     requestBody: 'buffered',
@@ -1675,6 +1734,7 @@ export function apply(ctx, config) {
         const decoded = decodeImageDataUrl(body.dataUrl)
         if (decoded === null) return json({ ok: false, error: '头像必须是 png/jpeg/webp，且不超过 400 KB' }, 400)
         const id = await saveAvatar(harnessHome(), decoded.bytes, decoded.ext)
+        await addAvatarToLibrary(harnessHome(), id, text(body.name), decoded.bytes.length)
         const store = await loadStore()
         const member = store.members.find((entry) => entry.id === text(body.memberId))
         if (member === undefined) return json({ ok: false, error: '找不到该成员' }, 404)

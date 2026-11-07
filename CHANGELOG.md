@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.45.0 — 2026-11-07
+
+- **照搬 DS-Bot 的角色管线**：把 `ds-bot/src/client/characters.js` 里 20 个由 SDF 模型投影出的角色
+  （whale/star/moon/wave/squircle/zed/hex/gumdrop/peanut/saucer/bunny/kitty/beacon/plus/magnet/acorn/pebbles/cushion/ring/gem）
+  内联进面板：body 用成员主色，paints 走原色，shade 叠 7% 黑，light 叠 18% 白；
+- **眼睛是从所有图层挖空的胶囊**：[cx, cy, w, h, tilt] 直接来自 DS-Bot 的投影数据，
+  用 mask 挖洞、背后垫白色胶囊，所以眼睛会随表面倾斜，而不是贴上去；
+- 每个成员按 id 哈希稳定分配一个角色，20 个形状足够 18 人各不同；
+- **头像素材库**：图片按 sha256 去重存一份（复用已有 avatar 文件），库索引在
+  `team-workbench/avatar-library.json`；支持批量导入（逐张校验、部分成功）、点选套用、移除；
+  成员卡「头像」一栏新增 📚（素材库）与「批量导入」（一次 ≤20 张）。
+- 新增路由 `/api/team-workbench/avatar-library`（GET 列表 / POST import|assign|delete），路由总数 23 → 24。
+
 ## 2.44.0 — 2026-11-07
 
 - 记录页：**命中词标黄**（大小写不敏感，标在会话名与正文里）+ **按时间分组**（今天 / 昨天 / 更早，
