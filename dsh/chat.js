@@ -473,7 +473,8 @@ function pickAutoResponder(userText, members, exclude) {
 export function resolveMaxParallel(room, memberCount) {
   const configured = Number(room?.maxParallel)
   if (Number.isSafeInteger(configured) && configured >= 1 && configured <= 5) return configured
-  return Math.max(3, Math.min(5, Math.ceil(Math.max(1, memberCount) / 2)))
+  // 默认并发 2：实测 3 路以上并不能把端到端缩短，反而抢上游配额、拉高 P95。
+  return Math.min(2, Math.max(1, memberCount))
 }
 
 /** 群聊：按应答模式选人，管理员可 @ 指派，成员之间按接力层数继续。 */

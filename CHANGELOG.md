@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2.80.1 — 2026-11-08
+
+- 群聊默认并发从 3 降到 2（实测 3 路以上抢上游配额、拉高 P95）；room.maxParallel 仍可覆盖 1–5。
+
 ## 2.80.0 — 2026-11-08
 
 补齐四个审计缺口（对齐 superagent 的 Decision / Outbox / Thread 读位点 / Source）：
