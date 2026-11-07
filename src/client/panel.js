@@ -149,6 +149,10 @@ window.__ModuleLoader__.load({
       ".ats-note.ok{background:rgba(46,160,67,.16);}",
       ".ats-out{white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.5;max-height:200px;overflow:auto;padding:6px 7px;border-radius:6px;background:rgba(127,127,127,.10);margin-top:5px;}",
       ".ats-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px 16px;text-align:center;line-height:1.6;color:var(--bt-ink-2);}",
+      ".ats-dep-subs{display:flex;flex-direction:column;gap:5px;max-height:240px;overflow:auto;}",
+      ".ats-dep-sub{display:flex;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--bt-line);border-radius:8px;}",
+      ".ats-dep-sub-name{font-size:12px;white-space:nowrap;}",
+      ".ats-dep-sub-role{flex:1 1 auto;min-width:0;font-size:11px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
       ".ats-lib{margin:6px 0 2px;padding:8px;border:1px solid var(--bt-line);border-radius:10px;background:var(--bt-hover);}",
       ".ats-lib-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;}",
       ".ats-lib-title{flex:1 1 auto;font-size:12px;font-weight:500;}",
@@ -884,6 +888,18 @@ window.__ModuleLoader__.load({
       useEffect(function () { if (!editing) setDraft(member); }, [member, editing]);
 
       function patchMember(part) { setDraft(function (prev) { return Object.assign({}, prev, part); }); }
+      // 部门成员：改某个子智能体的模型（保存在 department.subAgents 里）。
+      var setSubModel = function (subId, value) {
+        var parts = String(value || "").split("/");
+        var provider = parts.length > 1 ? parts[0] : "";
+        var model = parts.length > 1 ? parts.slice(1).join("/") : "";
+        var base = draft.department || member.department;
+        if (base === null || base === undefined) return;
+        var nextSubs = base.subAgents.map(function (sub) {
+          return sub.id === subId ? Object.assign({}, sub, { provider: provider, model: model }) : sub;
+        });
+        patchMember({ department: Object.assign({}, base, { subAgents: nextSubs }) });
+      };
 
       var routes = member.routes || [];
       var enabledRoutes = routes.filter(function (r) { return r.enabled; });
@@ -1041,6 +1057,28 @@ window.__ModuleLoader__.load({
                 )
               ),
               uploadError ? h("div", { className: "ats-note err" }, uploadError) : null,
+              member.department !== null && member.department !== undefined
+                ? h("div", { className: "ats-field" },
+                    h("span", { className: "ats-label" }, "部门子智能体（" + String(member.department.subAgents.length) + "）"),
+                    h("div", { className: "ats-dep-subs" },
+                      member.department.subAgents.map(function (sub) {
+                        var current = sub.provider.length > 0 && sub.model.length > 0 ? sub.provider + "/" + sub.model : "";
+                        var options = [{ value: "", label: "未配模型" }];
+                        (props.catalog || []).forEach(function (row) {
+                          (row.models || []).forEach(function (model) { options.push({ value: row.id + "/" + model.id, label: row.displayName + " · " + model.name }); });
+                        });
+                        return h("div", { key: sub.id, className: "ats-dep-sub" },
+                          h("span", { className: "ats-dep-sub-name" }, sub.emoji + " " + sub.name),
+                          h("span", { className: "ats-dep-sub-role" }, sub.role),
+                          h("select", {
+                            className: "ats-select", style: { flex: "0 0 210px" }, value: current,
+                            onChange: function (e) { setSubModel(sub.id, e.target.value); }
+                          }, options.map(function (option) { return h("option", { key: option.value, value: option.value }, option.label); }))
+                        );
+                      })
+                    )
+                  )
+                : null,
               library.open
                 ? h("div", { className: "ats-lib" },
                     h("div", { className: "ats-lib-head" },
@@ -1549,7 +1587,7 @@ window.__ModuleLoader__.load({
       var targetState = useState("");
       var target = targetState[0];
       var setTarget = targetState[1];
-      var deptState = useState({ busy: false, mode: "rotate", catalog: [], defaults: null });
+      var deptState = useState({ busy: false, mode: "rotate", importMode: "members", catalog: [], defaults: null });
       var dept = deptState[0];
       var setDept = deptState[1];
 
@@ -1587,8 +1625,17 @@ window.__ModuleLoader__.load({
           if (roles.length === 0) throw new Error("这个部门没有可加入的角色");
           var label = departmentId;
           (data.categories || []).forEach(function (c) { if (c.id === departmentId) label = c.name; });
-          return postRoles({ ids: roles.map(function (role) { return role.id; }), groupId: target, models: modelPool() }).then(function (payload) {
-            setBanner("已加入「" + label + "」" + String((payload.created || []).length) + " 个智能体，当前团队 " + String(payload.members.length) + " 名成员。");
+          var asDepartment = dept.importMode === "department";
+          return postRoles({
+            ids: roles.map(function (role) { return role.id; }),
+            groupId: target,
+            models: modelPool(),
+            asDepartment: asDepartment,
+            departmentName: asDepartment ? label : ""
+          }).then(function (payload) {
+            setBanner(asDepartment
+              ? "已把「" + label + "」作为 1 个部门智能体加入（内含 " + String(roles.length) + " 个子智能体），当前团队 " + String(payload.members.length) + " 名成员。"
+              : "已加入「" + label + "」" + String((payload.created || []).length) + " 个智能体，当前团队 " + String(payload.members.length) + " 名成员。");
             if (props.onTeamChanged) props.onTeamChanged(payload);
             return load(query, category, 0);
           });
@@ -1658,6 +1705,10 @@ window.__ModuleLoader__.load({
             onChange: function (v) { setTarget(v); }
           }),
           h("select", {
+            className: "ats-select", style: { flex: "0 0 128px" }, value: dept.importMode, title: "加入方式：逐个成员，或整个部门作为一个智能体",
+            onChange: function (e) { setDept(function (prev) { return Object.assign({}, prev, { importMode: e.target.value }); }); }
+          }, [["members", "逐个加入"], ["department", "整部门=1 个智能体"]].map(function (pair) { return h("option", { key: pair[0], value: pair[0] }, pair[1]); })),
+          h("select", {
             className: "ats-select", style: { flex: "0 0 132px" }, value: dept.mode, title: "部门导入时的模型分配策略",
             onChange: function (e) { setDept(function (prev) { return Object.assign({}, prev, { mode: e.target.value }); }); }
           }, [["rotate", "模型：轮流分配"], ["default", "模型：跟随默认"]].map(function (pair) { return h("option", { key: pair[0], value: pair[0] }, pair[1]); })),
@@ -1666,7 +1717,7 @@ window.__ModuleLoader__.load({
                 className: "ats-btn tiny primary", type: "button", disabled: dept.busy,
                 title: "把这个部门的全部角色一次加入团队，并按上面的策略配模型",
                 onClick: function () { importDepartment(category); }
-              }, dept.busy ? "加入中…" : "＋ 整部门加入")
+              }, dept.busy ? "加入中…" : (dept.importMode === "department" ? "＋ 作为部门加入" : "＋ 整部门加入"))
             : null
         ),
         h("div", { className: "ats-cats" },

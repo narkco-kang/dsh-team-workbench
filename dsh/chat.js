@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path'
 import {
   ROUTE_BASE,
   dispatchToMember,
+  runDepartmentMember,
   harnessHome,
   json,
   loadStore,
@@ -284,7 +285,10 @@ async function parentOf(ctx, sessionId) {
 }
 
 async function runMember(ctx, parent, member, prompt, signal) {
-  const result = await dispatchToMember(ctx, parent, member, prompt, signal)
+  // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
+  const result = member.department !== null && member.department !== undefined && member.department.subAgents.length > 0
+    ? await runDepartmentMember(ctx, parent, member, prompt, signal)
+    : await dispatchToMember(ctx, parent, member, prompt, signal)
   return { text: text(result.output), stopReason: result.stopReason, detail: result.detail, provider: result.provider, model: result.model }
 }
 

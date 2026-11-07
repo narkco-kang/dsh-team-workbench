@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.46.0'
+const PLUGIN_VERSION = '2.47.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -183,6 +183,29 @@ function normalizeRoleRef(raw) {
     : { library: text(source.library) || 'agency-agents-zh', id, version: text(source.version) }
 }
 
+/** 部门子智能体：一个角色 + 自己的模型路由（不单独出现在团队成员列表里）。 */
+function normalizeSubAgent(raw, index) {
+  const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  return {
+    id: text(source.id) || makeId('s'),
+    name: text(source.name) || '子智能体 ' + String(index + 1),
+    role: text(source.role) || '通用助手',
+    emoji: text(source.emoji) || '🤖',
+    provider: text(source.provider),
+    model: text(source.model),
+    reasoningEffort: text(source.reasoningEffort),
+    roleRef: normalizeRoleRef(source.roleRef)
+  }
+}
+
+/** 部门：一个成员代表整个部门，内部是若干子智能体。 */
+function normalizeDepartment(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const subs = Array.isArray(raw.subAgents) ? raw.subAgents.slice(0, 64).map(normalizeSubAgent) : []
+  if (subs.length === 0) return null
+  return { name: text(raw.name), subAgents: subs }
+}
+
 /** 规范化一个成员；兼容 v1 的单模型字段（provider/model/reasoningEffort）。 */
 function normalizeMember(raw, index) {
   const source = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
@@ -220,7 +243,9 @@ function normalizeMember(raw, index) {
     enabled: source.enabled === false ? false : true,
     createdAt: text(source.createdAt) || new Date().toISOString(),
     routes,
-    activeRouteId
+    activeRouteId,
+    // 部门成员：department 非空时，这个成员是一整个部门，subAgents 是它内部的子智能体。
+    department: normalizeDepartment(source.department)
   }
 }
 
@@ -518,6 +543,131 @@ async function withRoleInstructions(member) {
   }
 }
 
+/** 部门里的一个子智能体 → 可直接派发的临时成员（带自己的模型路由）。 */
+function subAgentMember(departmentName, sub) {
+  return {
+    id: sub.id,
+    name: sub.name,
+    role: sub.role,
+    emoji: sub.emoji,
+    color: '',
+    groupId: '',
+    avatar: { kind: 'emoji', imageId: '' },
+    roleRef: sub.roleRef,
+    instructions: '',
+    enabled: true,
+    createdAt: new Date().toISOString(),
+    activeRouteId: 'sub-route',
+    routes: sub.provider.length > 0 && sub.model.length > 0
+      ? [{ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
+      : []
+  }
+}
+
+/** 解析部门主管给出的选人结果；解析失败返回空数组。 */
+function parsePicks(raw, subs) {
+  const cleaned = String(raw || '').replace(/```(?:json)?/giu, '').trim()
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  if (start < 0 || end <= start) return []
+  let parsed = null
+  try { parsed = JSON.parse(cleaned.slice(start, end + 1)) } catch { return [] }
+  const list = Array.isArray(parsed?.picks) ? parsed.picks : []
+  const picks = []
+  for (const entry of list.slice(0, 4)) {
+    const key = text(entry?.id) || text(entry?.name)
+    const sub = subs.find((item) => item.id === key) || subs.find((item) => item.name === key)
+    if (sub === undefined) continue
+    picks.push({ sub, task: text(entry?.task) || '' })
+  }
+  return picks
+}
+
+/** 兜底选人：按任务与子智能体名字/职责的字面重合度挑前两个。 */
+function keywordPicks(task, subs) {
+  const needle = String(task || '')
+  const scored = subs.map((sub) => {
+    let score = 0
+    if (sub.name.length > 0 && needle.includes(sub.name)) score += 6
+    for (const ch of new Set(sub.name)) if (needle.includes(ch)) score += 1
+    if (sub.role.length > 0) for (const ch of new Set(sub.role)) if (needle.includes(ch)) score += 0.5
+    return { sub, score }
+  }).sort((a, b) => b.score - a.score)
+  return scored.slice(0, 2).map((entry) => ({ sub: entry.sub, task: '' }))
+}
+
+/**
+ * 部门成员：先由「部门主管」挑 1–4 个子智能体并分任务，再并行执行，最后由主管汇总。
+ */
+export async function runDepartmentMember(ctx, parent, member, task, signal) {
+  const department = member.department
+  const subs = department.subAgents
+  const roster = subs.map((sub, index) => String(index + 1) + '. ' + sub.name + '｜' + sub.role).join('\n')
+  const planPrompt = [
+    '你是「' + department.name + '」的部门主管。团队里只有下面这些子智能体：',
+    roster,
+    '',
+    '用户任务：',
+    task,
+    '',
+    '请挑 1–4 个最合适的子智能体来执行，并给每个人一句具体分工。',
+    '只输出 JSON，不要解释：{"picks":[{"name":"子智能体名字","task":"它要做什么"}]}'
+  ].join('\n')
+
+  let picks = []
+  try {
+    const plan = await dispatchToMember(ctx, parent, member, planPrompt, signal)
+    picks = parsePicks(plan.output, subs)
+  } catch { /* 主管挑人失败就用字面匹配兜底 */ }
+  if (picks.length === 0) picks = keywordPicks(task, subs)
+
+  const outcomes = await Promise.all(picks.map(async (pick) => {
+    const sub = subAgentMember(department.name, pick.sub)
+    const target = await withRoleInstructions(sub)
+    const prompt = [
+      '你是「' + department.name + '」部门里的「' + sub.name + '」。',
+      '职责：' + sub.role,
+      pick.task.length > 0 ? '本次分工：' + pick.task : '',
+      '',
+      '用户任务：',
+      task,
+      '',
+      '只给结论、依据和风险，不要寒暄，也不要重复任务原文。'
+    ].filter((line) => line.length > 0).join('\n')
+    try {
+      const result = await dispatchToMember(ctx, parent, target, prompt, signal)
+      return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed' }
+    } catch (error) {
+      return { name: sub.name, text: '', ok: false, error: String(error) }
+    }
+  }))
+
+  const usable = outcomes.filter((entry) => entry.text.trim().length > 0)
+  if (usable.length === 0) {
+    return { text: '部门里没有子智能体跑通（' + String(outcomes.length) + ' 个全部失败），请检查它们的模型配置。', stopReason: 'completed', detail: '', provider: '', model: '' }
+  }
+  const digest = usable.map((entry) => '【' + entry.name + '】\n' + entry.text).join('\n\n')
+  const synthPrompt = [
+    '你是「' + department.name + '」的部门主管，下面是你手下子智能体的结论：',
+    digest,
+    '',
+    '用户任务：',
+    task,
+    '',
+    '请综合成一段最终答复：先给结论，再给关键依据/风险；不要罗列“某某说”，也不要暴露内部流程。'
+  ].join('\n')
+  const synth = await dispatchToMember(ctx, parent, member, synthPrompt, signal)
+  return { text: text(synth.output), stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
+}
+
+/** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
+export async function runAnyMember(ctx, parent, member, task, signal) {
+  if (member.department !== null && member.department !== undefined && member.department.subAgents.length > 0) {
+    return runDepartmentMember(ctx, parent, member, task, signal)
+  }
+  return dispatchToMember(ctx, parent, member, task, signal)
+}
+
 /**
  * 在成员绑定的模型上运行一次委派，失败自动回退到下一条已启用路由。
  * @returns 最终结果 + 每条路由的尝试记录。
@@ -773,7 +923,7 @@ function registerTools(ctx) {
         throw new Error('名册中没有名为「' + requested + '」的成员。现有成员：' + (known.length > 0 ? known : '（空）'))
       }
       if (!member.enabled) throw new Error('成员「' + requested + '」已停用，请先在侧边栏启用')
-      const result = await dispatchToMember(ctx, parent, member, task, exec?.signal)
+      const result = await runAnyMember(ctx, parent, member, task, exec?.signal)
       return {
         name: member.name,
         provider: result.provider,
@@ -929,7 +1079,7 @@ function registerTools(ctx) {
         const member = byName(producerName)
         if (member === undefined) throw new Error('名册中没有名为「' + producerName + '」的成员')
         if (!member.enabled) throw new Error('成员「' + producerName + '」已停用，请先启用')
-        const first = await dispatchToMember(ctx, parent, member, task, exec?.signal)
+        const first = await runAnyMember(ctx, parent, member, task, exec?.signal)
         produced = first.output
         producerLabel = member.name
         chain.push({ stage: '产出', who: member.name, model: first.provider + '/' + first.model, verdict: first.stopReason === 'completed' ? '完成' : first.stopReason, note: '' })
@@ -1196,7 +1346,7 @@ async function roleLibrarySummary() {
 }
 
 /** 从角色库导入成员：只写 roleRef，正文在派发时按需读取，避免 team.json 膨胀。 */
-async function importRoles(store, ids, groupId, models) {
+async function importRoles(store, ids, groupId, models, options) {
   const index = await loadRoleIndex()
   const byId = new Map(index.roles.map((role) => [role.id, role]))
   const taken = new Set(store.members.map((member) => member.name))
@@ -1204,6 +1354,37 @@ async function importRoles(store, ids, groupId, models) {
     .map((entry) => ({ provider: text(entry?.provider), model: text(entry?.model) }))
     .filter((entry) => entry.provider.length > 0 && entry.model.length > 0)
   const created = []
+  const asDepartment = options !== null && typeof options === 'object' && options.asDepartment === true
+  if (asDepartment) {
+    const roles = (Array.isArray(ids) ? ids.map(text) : []).map((id) => byId.get(id)).filter((role) => role !== undefined)
+    if (roles.length === 0) return created
+    if (store.members.length >= MAX_MEMBERS) return created
+    const departmentName = text(options?.name) || roles[0].categoryName || '部门'
+    const name = uniqueName(departmentName, taken)
+    const subAgents = roles.map((role, index) => {
+      const pick = pool.length > 0 ? pool[index % pool.length] : null
+      return {
+        name: role.name,
+        role: role.description.length > 0 ? role.description.slice(0, 48) : role.categoryName,
+        emoji: role.emoji,
+        provider: pick === null ? '' : pick.provider,
+        model: pick === null ? '' : pick.model,
+        roleRef: { library: 'agency-agents-zh', id: role.id, version: index.version }
+      }
+    })
+    const lead = pool[0]
+    const member = normalizeMember({
+      name,
+      role: '部门智能体 · ' + String(roles.length) + ' 个子智能体',
+      emoji: '🏢',
+      groupId: text(groupId),
+      department: { name, subAgents },
+      routes: lead === undefined ? [] : [{ label: '部门主管', provider: lead.provider, model: lead.model, reasoningEffort: '' }]
+    }, store.members.length)
+    store.members.push(member)
+    created.push(member)
+    return created
+  }
   for (const id of Array.isArray(ids) ? ids.map(text) : []) {
     const role = byId.get(id)
     if (role === undefined) continue
@@ -1587,7 +1768,7 @@ export function apply(ctx, config) {
         return json({ ok: false, error: '会话 ' + sessionId + ' 当前没有活动的智能体，无法试跑' }, 409)
       }
       try {
-        const result = await dispatchToMember(ctx, parent, member, task, request.signal)
+        const result = await runAnyMember(ctx, parent, member, task, request.signal)
         return json({ ok: true, member: { id: member.id, name: member.name }, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
@@ -1605,7 +1786,10 @@ export function apply(ctx, config) {
           const body = await readJson(request)
           if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
           const store = await loadStore()
-          const created = await importRoles(store, body.ids, text(body.groupId), body.models)
+          const created = await importRoles(store, body.ids, text(body.groupId), body.models, {
+            asDepartment: body.asDepartment === true,
+            name: text(body.departmentName)
+          })
           if (created.length === 0) return json({ ok: false, error: '没有可导入的角色（id 不存在或已满员）' }, 400)
           await saveStore(store)
           return json({ ...(await snapshot()), created: created.map((member) => member.id) })
