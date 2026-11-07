@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.55.1 — 2026-11-07
+
+- 按上游市场协议补 `dsh.client.inject: ['dsh-desktop-workbenches']`（probe 校验必需）；
+- 刷新市场截图（team/chat 用 2.55 实测画面，1280×720）。
+
 ## 2.55.0 — 2026-11-07
 
 - 修 STT 400「unsupported audio format」：浏览器录的是 webm/opus，MiniMax 等云厂商不收；
