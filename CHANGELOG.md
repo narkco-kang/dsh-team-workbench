@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.80.2 — 2026-11-08
+
+- 修「SubagentError: subagent already exists」：宿主在子会话仍登记时拒绝复用固定 childId，
+  现在命中该错误自动退回一次性 childId 重试，不再把报错抛给用户。
+
 ## 2.80.1 — 2026-11-08
 
 - 群聊默认并发从 3 降到 2（实测 3 路以上抢上游配额、拉高 P95）；room.maxParallel 仍可覆盖 1–5。
