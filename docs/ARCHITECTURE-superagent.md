@@ -22,6 +22,10 @@
 | 叫停（撤回 Mandate） | `停止/取消` 关闭该 Thread 未结束工单并标记 `stoppedByPerson`，之后不再恢复 | ✅ |
 | 策略变更送达活单 | `savePolicy` 给 open 工单打 `policyNotice`，不撤销 Mandate | ✅ |
 | 中断恢复 | 启动时把 running 的 assignment 标为 interrupted，下一次消息续上 | ✅ |
+| Decision | 每次 Eval 判定（accept/stop/ignore/unavailable）落 `decisions.json`，含原因与策略版本 | ✅ 2.80.0 |
+| Channel / Outbox | 每次回复送 `outbox.json`（channel、ticket、状态、失败原因） | ✅ 2.80.0 |
+| Thread 读位点 | `threads.json` 记录每个会话处理到的工单与时间，重启不重放 | ✅ 2.80.0 |
+| Source | `sources.json` 区分来源：chat.web / schedule.cron / agent.tool | ✅ 2.80.0 |
 
 ## 与它的差异（刻意保留）
 

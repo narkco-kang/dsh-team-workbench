@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2.80.0 — 2026-11-08
+
+补齐四个审计缺口（对齐 superagent 的 Decision / Outbox / Thread 读位点 / Source）：
+- decisions.json：每次 Eval 判定留档（verdict、原因、策略版本、来源）；
+- outbox.json：每次回复的送达记录（channel、ticket、状态）；
+- threads.json：每个会话处理到的工单与时间，重启不重放；
+- sources.json：chat.web / schedule.cron / agent.tool 来源计数；
+- 新增 GET /audit?kind=decisions|outbox|threads|sources；测试扩到 15 项。
+
 ## 2.79.1 — 2026-11-08
 
 把工单域补到「真正可用」：

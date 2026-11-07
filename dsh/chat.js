@@ -46,7 +46,11 @@ import {
   slotOf
 } from './memory.js'
 import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
-import { addAssignment, endTicket, evaluate, finishAssignment, listTickets, loadPolicy, markInterrupted, openTicket, savePolicy, stopThread } from './tickets.js'
+import {
+  addAssignment, endTicket, evaluate, finishAssignment, listTickets, loadDecisions, loadOutbox,
+  loadPolicy, loadSources, loadThreads, markInterrupted, markThreadSeen, openTicket,
+  recordDecision, recordOutbox, recordSource, savePolicy, stopThread
+} from './tickets.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const MERGE_ROUTE = ROUTE_BASE + '/chats/merge'
@@ -60,6 +64,7 @@ const UPLOAD_ROUTE = ROUTE_BASE + '/upload'
 const SCHEDULE_ROUTE = ROUTE_BASE + '/schedules'
 const TTS_ROUTE = ROUTE_BASE + '/tts'
 const TICKETS_ROUTE = ROUTE_BASE + '/tickets'
+const AUDIT_ROUTE = ROUTE_BASE + '/audit'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -919,6 +924,8 @@ export function apply(ctx) {
         return json({ ok: false, error: '该成员正在回复上一条消息' }, 409)
       }
       const verdict = await evaluate({ text: userText, threadKind: 'private', threadId: member.id })
+      await recordDecision({ threadKind: 'private', threadId: member.id, verdict: verdict.verdict, reason: verdict.reason, text: userText, sourceKind: 'chat.web' })
+      await recordSource('chat.web')
       if (verdict.verdict === 'stop') {
         await stopThread('private', member.id)
         return json({ ok: false, error: '已停止该会话未结束的工单' }, 409)
@@ -936,7 +943,10 @@ export function apply(ctx) {
         const started = Date.now()
         const result = await sendPrivate(ctx, parent, member, userText, undefined)
         await finishAssignment(assignment, { ok: result.stopReason === 'completed', ms: Date.now() - started })
-        await endTicket(ticket.id, text(result.messages?.[result.messages.length - 1]?.text ?? ''))
+        const lastText = text(result.messages?.[result.messages.length - 1]?.text ?? '')
+        await endTicket(ticket.id, lastText)
+        await markThreadSeen('private', member.id, ticket.id)
+        await recordOutbox({ ticketId: ticket.id, channelKind: 'private', channelId: member.id, text: lastText, status: 'delivered' })
         return json({ ok: true, ticketId: ticket.id, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
@@ -968,6 +978,8 @@ export function apply(ctx) {
       return json({ ok: true, queued: true, messages: Array.isArray(queuedRoom?.messages) ? queuedRoom.messages : [] })
     }
     const verdict = await evaluate({ text: userText, threadKind: 'group', threadId: room.id })
+    await recordDecision({ threadKind: 'group', threadId: room.id, verdict: verdict.verdict, reason: verdict.reason, text: userText, sourceKind: 'chat.web' })
+    await recordSource('chat.web')
     if (verdict.verdict === 'stop') {
       const stopped = await stopThread('group', room.id)
       return json({ ok: false, error: '已停止该群 ' + String(stopped) + ' 张未结束的工单' }, 409)
@@ -993,7 +1005,10 @@ export function apply(ctx) {
           const doneChats = await loadChats()
           const doneRoom = doneChats.rooms.find((entry) => entry.id === room.id)
           const last = Array.isArray(doneRoom?.messages) ? doneRoom.messages[doneRoom.messages.length - 1] : undefined
-          await endTicket(ticket.id, text(last?.text ?? ''))
+          const lastText = text(last?.text ?? '')
+          await endTicket(ticket.id, lastText)
+          await markThreadSeen('group', room.id, ticket.id)
+          await recordOutbox({ ticketId: ticket.id, channelKind: 'group', channelId: room.id, text: lastText, status: 'delivered' })
         } catch (error) {
           console.warn('[team-workbench] 工单收尾失败：' + String(error))
         }
@@ -1605,6 +1620,25 @@ function registerChatTools(ctx) {
     }
   }))
 
+  // ── 审计：Decision / Outbox / Thread 读位点 / Source ────────────────────────
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: AUDIT_ROUTE,
+    methods: ['GET'],
+    fetch: async (request) => {
+      try {
+        const url = new URL(request.url)
+        const kind = url.searchParams.get('kind') || 'decisions'
+        const limit = Number(url.searchParams.get('limit') || 100)
+        if (kind === 'outbox') return json({ ok: true, outbox: await loadOutbox(limit) })
+        if (kind === 'threads') return json({ ok: true, threads: await loadThreads() })
+        if (kind === 'sources') return json({ ok: true, sources: await loadSources() })
+        return json({ ok: true, decisions: await loadDecisions(limit) })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
   // ── 定时任务：到点往指定会话发一句话 ─────────────────────────────────────────
   extraDisposers.push(ctx.connection.fetch.register({
     path: SCHEDULE_ROUTE,
@@ -1663,6 +1697,7 @@ function registerChatTools(ctx) {
       if (parent === undefined || parent === null) return
       for (const item of due) {
         try {
+          await recordSource('schedule.cron')
           if (item.targetKind === 'private') {
             const member = store.members.find((entry) => entry.id === item.targetId)
             if (member !== undefined) await sendPrivate(ctx, parent, member, item.text, undefined)

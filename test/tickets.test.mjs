@@ -51,6 +51,25 @@ ok('停止词判定为 stop', stopVerdict.verdict === 'stop')
 const outside = await tickets.evaluate({ text: '做活', threadKind: 'group', threadId: 'room-2' })
 ok('白名单外的会话被拒绝', outside.verdict === 'ignore')
 
+// 7. 审计：Decision / Outbox / Thread 读位点 / Source
+const decisions = await tickets.loadDecisions(10)
+await tickets.recordDecision({ threadKind: 'group', threadId: 'room-1', verdict: 'ignore', reason: '白名单外', text: '做活', sourceKind: 'chat.web' })
+const decisions2 = await tickets.loadDecisions(10)
+ok('Decision 留档（含 verdict/reason/policyVersion）', decisions2[0].verdict === 'ignore' && decisions2[0].reason === '白名单外' && typeof decisions2[0].policyVersion === 'number')
+
+await tickets.recordOutbox({ ticketId: afterStop.ticket.id, channelKind: 'group', channelId: 'room-1', text: '答复', status: 'delivered' })
+const outbox = await tickets.loadOutbox(10)
+ok('Outbox 记录送达', outbox[0].status === 'delivered' && outbox[0].channelId === 'room-1')
+
+await tickets.markThreadSeen('group', 'room-1', afterStop.ticket.id)
+const threads = await tickets.loadThreads()
+ok('Thread 读位点已写入', threads['group:room-1'].lastTicketId === afterStop.ticket.id)
+
+await tickets.recordSource('chat.web')
+await tickets.recordSource('schedule.cron')
+const sources = await tickets.loadSources()
+ok('Source 计数区分来源', sources['chat.web'].count >= 1 && sources['schedule.cron'].count === 1)
+
 const failed = results.filter((r) => !r.cond)
 console.log('结果: ' + (results.length - failed.length) + ' 通过 / ' + failed.length + ' 失败')
 rmSync(home, { recursive: true, force: true })

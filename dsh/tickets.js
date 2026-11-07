@@ -225,6 +225,136 @@ export async function stopThread(threadKind, threadId) {
   return count
 }
 
+
+// ── 审计面（补齐 superagent 的 Decision / Outbox / Thread 读位点 / Source）─────────
+
+function decisionsPath() {
+  return join(dir(), 'decisions.json')
+}
+
+function outboxPath() {
+  return join(dir(), 'outbox.json')
+}
+
+function threadsPath() {
+  return join(dir(), 'threads.json')
+}
+
+function sourcesPath() {
+  return join(dir(), 'sources.json')
+}
+
+async function appendJson(file, entry, limit) {
+  let list = []
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    if (Array.isArray(parsed)) list = parsed
+  } catch { /* 首次 */ }
+  list.push(entry)
+  await mkdir(dir(), { recursive: true })
+  await writeFile(file, JSON.stringify(list.slice(-(limit || 500)), null, 2), 'utf8')
+  return entry
+}
+
+async function readJson(file) {
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+/** 每次 Eval 的判定都留档：ignore / unavailable / stop / accept。 */
+export async function recordDecision(input) {
+  const policy = await loadPolicy()
+  return appendJson(decisionsPath(), {
+    id: makeId('dec'),
+    at: new Date().toISOString(),
+    threadKind: input.threadKind,
+    threadId: String(input.threadId),
+    verdict: text(input.verdict),
+    reason: text(input.reason),
+    text: text(input.text).slice(0, 500),
+    policyVersion: policy.version,
+    sourceKind: text(input.sourceKind) || 'chat.web'
+  })
+}
+
+export async function loadDecisions(limit) {
+  return (await readJson(decisionsPath())).slice(-(Number(limit) || 100)).reverse()
+}
+
+/** 回复送达记录：channel 是写回目标，status 是 delivered / failed。 */
+export async function recordOutbox(input) {
+  return appendJson(outboxPath(), {
+    id: makeId('out'),
+    at: new Date().toISOString(),
+    ticketId: text(input.ticketId),
+    channelKind: input.channelKind === 'private' ? 'private' : 'group',
+    channelId: String(input.channelId),
+    status: text(input.status) || 'delivered',
+    error: text(input.error),
+    preview: text(input.text).slice(0, 300)
+  })
+}
+
+export async function loadOutbox(limit) {
+  return (await readJson(outboxPath())).slice(-(Number(limit) || 100)).reverse()
+}
+
+/**
+ * Thread 读位点：记录每个会话已经处理到的工单与时间。
+ * 重启后据此判断「哪些消息已经处理过」，不重放。
+ */
+export async function markThreadSeen(threadKind, threadId, ticketId) {
+  let map = {}
+  try {
+    const parsed = JSON.parse(await readFile(threadsPath(), 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed
+  } catch { /* 首次 */ }
+  const key = (threadKind === 'private' ? 'private:' : 'group:') + String(threadId)
+  map[key] = { lastTicketId: text(ticketId), lastAt: new Date().toISOString() }
+  await mkdir(dir(), { recursive: true })
+  await writeFile(threadsPath(), JSON.stringify(map, null, 2), 'utf8')
+  return map[key]
+}
+
+export async function loadThreads() {
+  try {
+    const parsed = JSON.parse(await readFile(threadsPath(), 'utf8'))
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 来源计数：chat.web（页面）、schedule.cron（定时任务）、agent.tool（工具派发）。 */
+export async function recordSource(kind) {
+  let map = {}
+  try {
+    const parsed = JSON.parse(await readFile(sourcesPath(), 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed
+  } catch { /* 首次 */ }
+  const key = text(kind) || 'chat.web'
+  const row = map[key] || { count: 0, firstAt: new Date().toISOString(), lastAt: '' }
+  row.count += 1
+  row.lastAt = new Date().toISOString()
+  map[key] = row
+  await mkdir(dir(), { recursive: true })
+  await writeFile(sourcesPath(), JSON.stringify(map, null, 2), 'utf8')
+  return row
+}
+
+export async function loadSources() {
+  try {
+    const parsed = JSON.parse(await readFile(sourcesPath(), 'utf8'))
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
 export async function listTickets(threadKind, threadId, limit) {
   const list = await loadTickets()
   const filtered = list.filter((ticket) => (threadKind === undefined || ticket.threadKind === threadKind) && (threadId === undefined || ticket.threadId === String(threadId)))
