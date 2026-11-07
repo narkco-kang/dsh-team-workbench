@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.71.2'
+const PLUGIN_VERSION = '2.71.3'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -500,11 +500,16 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   const providerName = resolveProviderName(ctx)
   const personaParts = ['你是智能体团队中的成员「' + member.name + '」，职责：' + member.role + '。']
   if (member.instructions.trim().length > 0) personaParts.push(member.instructions.trim())
+  const persona = personaParts.join('\n\n')
+  // persona 字段是宿主的系统提示；个别 provider/路由（实测 claude 系）不消费它，
+  // 子智能体就自称「通用编码智能体」。所以同一份身份也写进 prompt 开头，双通道保证生效。
+  const roleHeader = '【角色】你是团队中的「' + member.name + '」，职责：' + member.role + '。' +
+    (member.instructions.trim().length > 0 ? '\n【角色说明】' + member.instructions.trim() : '')
   const request = {
     label: member.name + ' · ' + routeLabel(route),
-    prompt: [{ type: 'text', text: task }],
+    prompt: [{ type: 'text', text: roleHeader + '\n\n【任务】\n' + task }],
     parent,
-    persona: personaParts.join('\n\n')
+    persona
   }
   if (route !== null && route.provider.length > 0 && route.model.length > 0) {
     const agentOptions = { provider: route.provider, model: route.model }
