@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.71.2 — 2026-11-08
+
+- 修宿主拒绝注册的 schema：department 用了 type 数组，宿主只接受单一 type 字符串，导致整个插件加载失败、全部路由 404（前端报 not found 非 JSON）；
+- department 改为单一 type object + additionalProperties，普通成员输出时不带该字段；
+- 这正是「重启后仍报 Unexpected token o」的根因。
+
 ## 2.71.1 — 2026-11-08
 
 - 修非 JSON 响应导致的报错：客户端所有请求改为先读 text 再 JSON.parse，服务端返回纯文本时给出可读提示（HTTP 404 会提示需要重启 Harness）；

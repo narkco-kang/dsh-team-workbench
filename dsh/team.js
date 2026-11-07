@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.71.1'
+const PLUGIN_VERSION = '2.71.2'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -834,28 +834,17 @@ const MEMBER_SCHEMA = {
     routes: { type: 'array', description: '该智能体的模型路由列表。', items: ROUTE_SCHEMA },
     // 部门成员会带这个字段（普通成员为 null）。schema 是 additionalProperties:false，
     // 漏声明会让 agent_team_roster 整体校验失败、名册读不出来。
+    // 宿主 schema 校验只接受单一 type 字符串（不支持 type 数组 / null），
+    // 所以普通成员直接不返回这个字段，部门成员的 subAgents 也用宽松 object 描述。
     department: {
-      type: ['object', 'null'],
-      description: '部门子智能体（部门成员才有；普通成员为 null）。',
+      type: 'object',
+      description: '部门成员才有：包含部门名与子智能体列表；普通成员不返回该字段。',
+      additionalProperties: true,
       properties: {
         name: { type: 'string' },
         subAgents: {
           type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['id', 'name', 'role', 'emoji', 'provider', 'model', 'reasoningEffort', 'roleRef'],
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              role: { type: 'string' },
-              emoji: { type: 'string' },
-              provider: { type: 'string' },
-              model: { type: 'string' },
-              reasoningEffort: { type: 'string' },
-              roleRef: ROLE_REF_SCHEMA
-            }
-          }
+          items: { type: 'object', additionalProperties: true }
         }
       }
     }
@@ -932,7 +921,12 @@ function registerTools(ctx) {
           await saveStore(store)
         }
       }
-      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, chiefId: store.chiefId || '', groups: store.groups, members: store.members }
+      const members = store.members.map((member) => {
+        const copy = Object.assign({}, member)
+        if (copy.department === null || copy.department === undefined) delete copy.department
+        return copy
+      })
+      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, chiefId: store.chiefId || '', groups: store.groups, members }
     }
   }
 
