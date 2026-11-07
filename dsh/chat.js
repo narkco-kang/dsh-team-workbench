@@ -362,7 +362,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const memory = await loadMemory()
   pushMessage(target.messages, messageOf('user', null, userText))
   // 过程化状态：前端轮询 progress，看到「现在轮到谁」和已经跑完的每一棒。
-  target.progress = { startedAt: new Date().toISOString(), current: '', steps: [], finishedAt: '' }
+  target.progress = { startedAt: new Date().toISOString(), current: '', parallel: [], steps: [], finishedAt: '' }
   await saveChats(chats)
 
   const responder = responderOf(target)
@@ -387,41 +387,78 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
 
   if (start.length === 0) return { messages: target.messages, turns, responder, pickedId }
 
+  // 参考 dsh-superagent 的「worker slot + 并发启动」：同一层的成员各自一个子会话并行跑，
+  // 用并发上限（默认 3）控制 slot；管理员那一棒仍然先跑，因为要由它决定派给谁。
+  const parallelOn = target.parallel !== false
+  const maxParallel = Math.max(1, Math.min(5, Number(target.maxParallel) || 3))
+  if (!Array.isArray(target.progress.parallel)) target.progress.parallel = []
+  // 并发完成时各自都会改 chats，统一串行落盘，避免互相覆盖。
+  let saveChain = Promise.resolve()
+  const persist = () => {
+    saveChain = saveChain.then(() => saveChats(chats)).catch(() => undefined)
+    return saveChain
+  }
+
+  const runTurn = async (member, depth, lastSpeaker) => {
+    const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
+    const prompt = depth === 0 && admin !== undefined && member.id === admin.id
+      ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
+      : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
+    const step = { name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0, emoji: member.emoji }
+    target.progress.steps.push(step)
+    if (target.progress.parallel.length < 2) target.progress.current = member.name
+    await persist()
+    const raw = await runMember(ctx, parent, member, prompt, signal)
+    const reply = { ...raw, text: stripReceipts(raw.text) }
+    step.phase = 'done'
+    step.ms = Date.now() - Date.parse(step.startedAt)
+    step.summary = summaryOf(reply.text)
+    target.progress.parallel = target.progress.parallel.filter((name) => name !== member.name)
+    target.progress.current = target.progress.parallel[0] || ''
+    await persist()
+    return { member, reply, step }
+  }
+
+  const runBatch = async (batch, depth, lastSpeaker) => {
+    const results = new Array(batch.length)
+    let cursor = 0
+    const lane = async () => {
+      while (cursor < batch.length) {
+        const index = cursor
+        cursor += 1
+        results[index] = await runTurn(batch[index], depth, lastSpeaker)
+      }
+    }
+    const lanes = Math.min(parallelOn ? maxParallel : 1, batch.length)
+    await Promise.all(Array.from({ length: lanes }, lane))
+    return results.filter((entry) => entry !== undefined)
+  }
+
   let queue = start
   let depth = 0
   let lastSpeaker = ''
 
   while (queue.length > 0 && turns.length < MAX_TURNS_PER_MESSAGE && depth <= relayDepth) {
+    const room = MAX_TURNS_PER_MESSAGE - turns.length
+    const batch = queue.filter((member) => !used.has(member.id)).slice(0, room)
+    if (batch.length === 0) break
+    for (const member of batch) used.add(member.id)
+    target.progress.parallel = batch.length > 1 ? batch.map((member) => member.name) : []
+    await persist()
+    const results = await runBatch(batch, depth, lastSpeaker)
+    target.progress.parallel = []
     const next = []
-    for (const member of queue) {
-      if (used.has(member.id)) continue
-      used.add(member.id)
-      if (turns.length >= MAX_TURNS_PER_MESSAGE) break
-      const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
-      const prompt = depth === 0 && admin !== undefined && member.id === admin.id
-        ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
-        : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
-      target.progress.current = member.name
-      target.progress.steps.push({ name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0 })
-      await saveChats(chats)
-      const raw = await runMember(ctx, parent, member, prompt, signal)
-      const reply = { ...raw, text: stripReceipts(raw.text) }
-      const step = target.progress.steps[target.progress.steps.length - 1]
-      step.phase = 'done'
-      step.ms = Date.now() - Date.parse(step.startedAt)
-      step.summary = summaryOf(reply.text)
-      step.emoji = member.emoji
-      target.progress.current = ''
+    for (const { member, reply } of results) {
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
-      target.updatedAt = new Date().toISOString()
-      await saveChats(chats)
       lastSpeaker = member.name
       for (const mentioned of parseMentions(reply.text, alive, used)) {
         if (next.length >= MAX_MENTIONS) break
         next.push(mentioned)
       }
     }
+    target.updatedAt = new Date().toISOString()
+    await persist()
     queue = next
     depth += 1
   }
@@ -533,7 +570,9 @@ export async function applyRoomAction(body) {
     const responder = RESPONDERS.includes(text(body?.room?.responder)) ? text(body.room.responder) : 'lead'
     const relayValue = Number(body?.room?.relayDepth)
     const relayDepth = Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2 ? relayValue : 1
-    const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
+    const parallel = body?.room?.parallel !== false
+    const maxParallel = Math.max(1, Math.min(5, Number(body?.room?.maxParallel) || 3))
+    const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, parallel, maxParallel, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
     chats.rooms.push(room)
     await saveChats(chats)
     return { room }
@@ -563,6 +602,9 @@ export async function applyRoomAction(body) {
     if (RESPONDERS.includes(text(body?.room?.responder))) room.responder = text(body.room.responder)
     const relayValue = Number(body?.room?.relayDepth)
     if (Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2) room.relayDepth = relayValue
+    if (body?.room?.parallel !== undefined) room.parallel = body.room.parallel !== false
+    const parallelValue = Number(body?.room?.maxParallel)
+    if (Number.isSafeInteger(parallelValue) && parallelValue >= 1 && parallelValue <= 5) room.maxParallel = parallelValue
     await saveChats(chats)
     return { room }
   }

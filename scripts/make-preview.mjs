@@ -99,8 +99,13 @@ window.fetch = function (url, init) {
     if (elapsed > 2600) { trail.push({ name: '分析师', phase: 'done', ms: 1400, summary: '两周可行，但必须砍范围', emoji: '📊' }); current = '工程师'; }
     if (elapsed > 4200) { trail.push({ name: '工程师', phase: 'done', ms: 1600, summary: '两天可以，先做只读版本', emoji: '🛠️' }); current = '审核员'; }
     var emojiOf = { '分析师': '📊', '工程师': '🛠️', '审核员': '⚖️' };
-    trail.push({ name: current, phase: 'thinking', ms: 0, emoji: emojiOf[current] || '🤖' });
-    data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: current, steps: trail, finishedAt: '' } };
+    var parallelNames = elapsed > 2600 && elapsed <= 4200 ? ['分析师', '工程师'] : [];
+    if (parallelNames.length > 0) {
+      parallelNames.forEach(function (name) { trail.push({ name: name, phase: 'thinking', ms: 0, emoji: emojiOf[name] || '🤖' }); });
+    } else {
+      trail.push({ name: current, phase: 'thinking', ms: 0, emoji: emojiOf[current] || '🤖' });
+    }
+    data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: parallelNames.length > 0 ? '' : current, parallel: parallelNames, steps: trail, finishedAt: '' } };
     return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
   }
   if (init && String(init.method || '').toUpperCase() === 'POST' && (u.indexOf('/api/team-workbench/chats/private') === 0 || u.indexOf('/api/team-workbench/chats/group') === 0)) {
