@@ -467,6 +467,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     step.summary = summaryOf(reply.text)
     target.progress.parallel = target.progress.parallel.filter((name) => name !== member.name)
     target.progress.current = target.progress.parallel[0] || ''
+    // 谁先完成谁先发言（参考 DS-Bot）：不必等同批其他人，用户能更早看到结果。
+    if (reply.text.trim().length > 0) {
+      pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
+    }
     await persist()
     return { member, reply, step }
   }
@@ -508,7 +512,6 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     const next = []
     for (const { member, reply } of results) {
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
-      if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
       lastSpeaker = member.name
       for (const mentioned of parseMentions(reply.text, alive, used)) {
         if (next.length >= MAX_MENTIONS) break
@@ -838,8 +841,20 @@ export function apply(ctx) {
     if (busy.has(key)) return json({ ok: false, error: '该群正在回复上一条消息' }, 409)
     busy.add(key)
     try {
-      const result = await sendGroup(ctx, parent, room, store.members, userText, undefined)
-      return json({ ok: true, ...result })
+      // 20 秒内没跑完就先回「已派出」，结果落盘后由客户端轮询补上；
+      // 不把用户按在这里等一分钟（长任务/多轮接力时尤其明显）。
+      const work = sendGroup(ctx, parent, room, store.members, userText, undefined)
+      work.then((value) => { busy.delete(key); return value }, () => { busy.delete(key) })
+      const early = await Promise.race([
+        work.then((value) => ({ kind: 'done', value })),
+        new Promise((resolve) => setTimeout(() => resolve({ kind: 'slow' }), 20000))
+      ])
+      if (early.kind === 'slow') {
+        const latest = await loadChats()
+        const snapshot = latest.rooms.find((entry) => entry.id === room.id)
+        return json({ ok: true, background: true, messages: Array.isArray(snapshot?.messages) ? snapshot.messages : [], turns: [] })
+      }
+      return json({ ok: true, ...early.value })
     } catch (error) {
       return json({ ok: false, error: String(error) }, 500)
     } finally {

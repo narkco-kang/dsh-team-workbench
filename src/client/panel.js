@@ -2990,6 +2990,30 @@ window.__ModuleLoader__.load({
             setMessages(list);
             setDraft("");
             loadOverview();
+            if (json && json.background === true) {
+              // 服务端 20 秒没跑完就先回了「已派出」：保持等待状态，轮询到结果再收尾。
+              return new Promise(function (resolve) {
+                var initial = list.length;
+                var timer = setInterval(function () {
+                  fetch(threadUrl, { cache: "no-store" })
+                    .then(function (res) { return readJsonResponse(res); })
+                    .then(function (payload) {
+                      var next = Array.isArray(payload.messages) ? payload.messages : [];
+                      THREAD_CACHE[threadUrl] = next;
+                      setMessages(next);
+                      var last = next[next.length - 1];
+                      if (next.length > initial && last !== undefined && last.role !== "user") {
+                        clearInterval(timer);
+                        loadOverview();
+                        resolve();
+                      }
+                    })
+                    .catch(function () { /* 下一轮再试 */ });
+                }, 1500);
+                setTimeout(function () { clearInterval(timer); resolve(); }, 300000);
+              });
+            }
+            return undefined;
           })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
           .then(function () { delete PENDING_CHATS[pendingKey]; clearInterval(poll); setThinkingProgress(null); setBusy(false); setBusyTarget(null); });
