@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.99.2 — 2026-11-08
+
+- 子智能体步骤会写明失败原因：无输出 / stopReason / detail，便于定位为什么只回了 N 条；
+- 空输出不再算 done。
+
 ## 2.99.1 — 2026-11-08
 
 - 修复流式贴群未生效：runMember 没有把 onSubResult 转发给部门 runner；

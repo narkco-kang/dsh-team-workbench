@@ -673,7 +673,14 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
       onSubStepEnd: async (name, patch) => {
         target.progress.parallel = (target.progress.parallel || []).filter((entry) => entry !== name)
         const found = target.progress.steps.find((entry) => entry.name === name && entry.phase === 'thinking')
-        if (found !== undefined) { found.phase = patch && patch.ok === false ? 'failed' : 'done'; found.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0 }
+        if (found !== undefined) {
+          found.phase = patch && patch.ok === false ? 'failed' : 'done'
+          found.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0
+          const reason = patch && patch.stopReason ? String(patch.stopReason) : ''
+          const detail = patch && patch.detail ? String(patch.detail) : ''
+          found.summary = patch && patch.empty ? '无输出' + (reason.length > 0 ? ' · ' + reason : '') : (reason.length > 0 && reason !== 'completed' ? reason : '已完成')
+          if (detail.length > 0) found.summary += ' · ' + detail.slice(0, 60)
+        }
         await persist()
       },
       // 子智能体产出即刻进群（DS-Bot 的观感，但没有它 7 次串行的代价）。
