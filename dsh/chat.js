@@ -820,7 +820,9 @@ export function apply(ctx) {
       if (busy.has(key)) return json({ ok: false, error: '该成员正在回复上一条消息' }, 409)
       busy.add(key)
       try {
-        const result = await sendPrivate(ctx, parent, member, userText, request.signal)
+        // 不把 HTTP 请求的 signal 传给模型调用：客户端切页/断开时，生成仍应继续并落盘，
+        // 否则「切走再回来」会看到会话被中断、没有结果。
+        const result = await sendPrivate(ctx, parent, member, userText, undefined)
         return json({ ok: true, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
@@ -836,7 +838,7 @@ export function apply(ctx) {
     if (busy.has(key)) return json({ ok: false, error: '该群正在回复上一条消息' }, 409)
     busy.add(key)
     try {
-      const result = await sendGroup(ctx, parent, room, store.members, userText, request.signal)
+      const result = await sendGroup(ctx, parent, room, store.members, userText, undefined)
       return json({ ok: true, ...result })
     } catch (error) {
       return json({ ok: false, error: String(error) }, 500)

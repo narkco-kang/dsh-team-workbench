@@ -2325,6 +2325,8 @@ window.__ModuleLoader__.load({
 
     // 会话概览的内存缓存：切标签会卸载/重挂 ChatPanel，有缓存就先渲染再后台刷新，避免侧栏闪空白。
     var CHAT_OVERVIEW_CACHE = { data: null, at: 0 };
+    // 正在等待回复的会话（切标签会卸载 ChatPanel，回来时要能续上「等待中」状态）。
+    var PENDING_CHATS = Object.create(null);
     function cachedOverview() {
       if (CHAT_OVERVIEW_CACHE.data === null) return null;
       return CHAT_OVERVIEW_CACHE.data;
@@ -2855,6 +2857,47 @@ window.__ModuleLoader__.load({
         });
       }, []);
 
+      // 切页回来：如果这个会话还在等回复，恢复「等待中」并轮询，直到出现新回复。
+      useEffect(function () {
+        if (target === null) return undefined;
+        var key = target.kind + ":" + target.id;
+        if (PENDING_CHATS[key] === undefined) return undefined;
+        setBusy(true);
+        setBusyTarget(target);
+        setThinkingStart(PENDING_CHATS[key]);
+        var url = target.kind === "private"
+          ? "/api/team-workbench/chats/private?memberId=" + encodeURIComponent(target.id)
+          : "/api/team-workbench/chats/group?id=" + encodeURIComponent(target.id);
+        var initial = messages.length;
+        var timer = setInterval(function () {
+          if (Date.now() - PENDING_CHATS[key] > 300000) {
+            delete PENDING_CHATS[key];
+            clearInterval(timer);
+            setBusy(false);
+            setBusyTarget(null);
+            setBanner("这次回复超过 5 分钟仍无结果，可能已中断；可重新发送。");
+            return;
+          }
+          fetch(url, { cache: "no-store" })
+            .then(function (res) { return readJsonResponse(res); })
+            .then(function (json) {
+              var list = Array.isArray(json.messages) ? json.messages : [];
+              setMessages(list);
+              var last = list[list.length - 1];
+              if (list.length > initial && last !== undefined && last.role !== "user") {
+                delete PENDING_CHATS[key];
+                clearInterval(timer);
+                setThinkingProgress(null);
+                setBusy(false);
+                setBusyTarget(null);
+                loadOverview();
+              }
+            })
+            .catch(function () { /* 下一轮再试 */ });
+        }, 1500);
+        return function () { clearInterval(timer); };
+      }, [target]);
+
       useEffect(function () { loadOverview(); }, [loadOverview]);
       // 定期刷新会话概览：团队页合并部门、新建成员后，侧栏不用切页也能更新。
       useEffect(function () {
@@ -2904,6 +2947,8 @@ window.__ModuleLoader__.load({
       var send = function () {
         var body = draft.trim();
         if (body.length === 0 || target === null || busy) return;
+        var pendingKey = target.kind + ":" + target.id;
+        PENDING_CHATS[pendingKey] = Date.now();
         setBusy(true);
         setBusyTarget(target);
         setThinkingStart(Date.now());
@@ -2930,7 +2975,7 @@ window.__ModuleLoader__.load({
             loadOverview();
           })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
-          .then(function () { clearInterval(poll); setThinkingProgress(null); setBusy(false); setBusyTarget(null); });
+          .then(function () { delete PENDING_CHATS[pendingKey]; clearInterval(poll); setThinkingProgress(null); setBusy(false); setBusyTarget(null); });
       };
 
       var openForm = function () {
