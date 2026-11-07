@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.77.0 — 2026-11-08
+
+- 语音通话改用服务端 TTS：新增 /tts 路由，调用 MiniMax t2a_v2（speech-02-hd，hex mp3），
+  浏览器 speechSynthesis 仅作回退；音质与中文自然度明显好于系统语音。
+- 说明：Qwen3-TTS 官方只提供本地 GPU 推理或 DashScope 实时 WebSocket API，本机没有可用通道；
+  若后续提供 DashScope Key，可在同一路由里替换为 qwen3-tts。
+
 ## 2.76.0 — 2026-11-08
 
 - 运行中插话：宿主 Agent 暴露 steer 时，回复过程中再发消息会真正插进正在跑的一轮（不再只是排队）；拿不到句柄时自动退回排队；

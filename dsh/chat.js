@@ -57,6 +57,7 @@ const MEMORY_ROUTE = ROUTE_BASE + '/memory'
 const STT_ROUTE = ROUTE_BASE + '/stt'
 const UPLOAD_ROUTE = ROUTE_BASE + '/upload'
 const SCHEDULE_ROUTE = ROUTE_BASE + '/schedules'
+const TTS_ROUTE = ROUTE_BASE + '/tts'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -108,6 +109,18 @@ const MAX_ROOMS = 24
 /** 附件与定时任务都放在工作台自己的目录里，卸载插件不会丢。 */
 function uploadsDir() {
   return join(harnessHome(), 'team-workbench', 'uploads')
+}
+
+/** 从宿主凭据文件里取一个键（TTS 复用已有的 MiniMax / DashScope key）。 */
+async function readCredential(name) {
+  try {
+    const raw = await readFile(join(harnessHome(), '.credentials.yaml'), 'utf8')
+    const match = new RegExp('^\\s*' + name + ':\\s*(.+)$', 'm').exec(raw)
+    if (match === null) return ''
+    return match[1].trim().replace(/^['"]|['"]$/g, '')
+  } catch {
+    return ''
+  }
 }
 
 function schedulesPath() {
@@ -1426,6 +1439,43 @@ function registerChatTools(ctx) {
         return json({ ok: true, path: file, name: rawName })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  // ── 语音合成：优先 MiniMax TTS（HTTP，返回 hex mp3）；没有 key 就让前端回退浏览器 TTS ──
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: TTS_ROUTE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const body = await readJson(request)
+        const value = text(body?.text)
+        if (value.length === 0) return json({ ok: false, error: '要朗读的文本为空' }, 400)
+        const key = await readCredential('MINIMAX_CN_API_KEY') || await readCredential('MINIMAX_API_KEY')
+        if (key.length === 0) return json({ ok: false, error: '没有 TTS 密钥（MINIMAX_CN_API_KEY）', fallback: 'browser' }, 501)
+        const payload = {
+          model: text(body?.model) || 'speech-02-hd',
+          text: value.slice(0, 2000),
+          stream: false,
+          voice_setting: { voice_id: text(body?.voice) || 'female-shaonv', speed: Number(body?.speed) || 1, vol: 1, pitch: 0 },
+          audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 }
+        }
+        const response = await fetch('https://api.minimax.chat/v1/t2a_v2', {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(60000)
+        })
+        const parsed = await response.json().catch(() => null)
+        const hex = text(parsed?.data?.audio)
+        if (!response.ok || hex.length === 0) {
+          return json({ ok: false, error: text(parsed?.base_resp?.status_msg) || ('TTS HTTP ' + response.status), fallback: 'browser' }, 502)
+        }
+        return new Response(Buffer.from(hex, 'hex'), { status: 200, headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' } })
+      } catch (error) {
+        return json({ ok: false, error: String(error), fallback: 'browser' }, 500)
       }
     }
   }))
