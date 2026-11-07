@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.1.0'
+const PLUGIN_VERSION = '3.1.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -590,7 +590,7 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
     // 同样的保护：某些 provider 卡住时 run.result 永不 resolve。
     settled = await Promise.race([
       run.result,
-      new Promise((resolve) => setTimeout(() => resolve({ stopReason: 'timeout', diagnostic: '模型调用超过 20 秒未返回' }), 20000))
+      new Promise((resolve) => setTimeout(() => resolve({ stopReason: 'timeout', diagnostic: '模型调用超过 25 秒未返回' }), 25000))
     ])
   } finally {
     try { await run.dispose() } catch { /* 清理失败不影响已收集的结果 */ }
@@ -814,16 +814,16 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       pick.task.length > 0 ? '本次分工：' + pick.task : '',
       '',
       '用户任务：',
-      task,
+      String(task).slice(0, 1200),
       '',
-      '只给结论、依据和风险，不要寒暄，也不要重复任务原文。',
+      '只输出 2–3 句结论（不超过 120 字），不要寒暄、不要复述任务、不要列清单。',
       '不需要写代码；若必须调用 run_code，请用 ES module 语法（import / await），不要用 require。'
     ].filter((line) => line.length > 0).join('\n')
     try {
       // 每个子智能体最多 30 秒；一个慢成员不能拖住整轮汇总。
       const result = await Promise.race([
         dispatchToMember(ctx, parent, target, prompt, signal),
-        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 25000))
+        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 30000))
       ])
       // 流式：每个子智能体一产出就贴到群里，不等其他人，也不等主管汇总。
       if (hooks !== undefined && typeof hooks.onSubResult === 'function' && text(result.output).trim().length > 0) {
