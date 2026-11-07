@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.73.0'
+const PLUGIN_VERSION = '2.73.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -964,9 +964,21 @@ function registerTools(ctx) {
         copy.department = {
           name: copy.department.name,
           subAgents: copy.department.subAgents.map((sub) => Object.assign({}, sub, {
-            routes: sub.provider.length > 0 && sub.model.length > 0
-              ? [{ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
-              : []
+            // 与派发时一致：主路由 + 两条 deepseek 兜底，避免调用方误判「无 fallback」。
+            routes: (function () {
+              const list = []
+              if (sub.provider.length > 0 && sub.model.length > 0) {
+                list.push({ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true })
+              }
+              for (const fallback of [
+                { provider: 'deepseek-official', model: 'deepseek-flash' },
+                { provider: 'deepseek-official', model: 'deepseek-v4-pro' }
+              ]) {
+                if (list.some((route) => route.provider === fallback.provider && route.model === fallback.model)) continue
+                list.push({ id: 'sub-fb-' + fallback.model, label: '回退 · ' + fallback.model, provider: fallback.provider, model: fallback.model, reasoningEffort: '', enabled: true })
+              }
+              return list
+            })()
           }))
         }
         return copy
