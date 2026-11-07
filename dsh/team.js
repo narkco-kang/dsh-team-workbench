@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.71.5'
+const PLUGIN_VERSION = '2.71.6'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -674,8 +674,11 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
   ].join('\n')
   const synth = await dispatchToMember(ctx, parent, member, synthPrompt, signal)
   const finalText = text(synth.output)
+  // 汇总失败/串味时，主管可能把内部「派活 JSON」当答复吐出来；这种绝不直接展示给用户。
+  const looksLikePlan = /"picks"\s*:/.test(finalText) && finalText.trim().slice(0, 1) === '{'
+  const answer = looksLikePlan ? digest : finalText
   // 同时给 text 与 output：部门派发既被聊天用（读 text），也被 agent_team_task 用（读 output）。
-  return { text: finalText, output: finalText, stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
+  return { text: answer, output: answer, stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
 }
 
 /** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
