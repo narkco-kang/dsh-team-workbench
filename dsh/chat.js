@@ -490,7 +490,40 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
 }
 
 /**
- * 语音识别的「模型校对」：让团队里的某个成员只做最小纠错（同音字/错字/漏标点），不改写、不回答。
+ * ASR 服务商 → 同系聊天服务商候选 id（用于「跟随识别服务商」）。
+ */
+const SAME_PROVIDER_CANDIDATES = {
+  minimax: ['minimax-cn', 'minimax'],
+  glm: ['glm', 'zhipu', 'bigmodel'],
+  openai: ['openai', 'gpt'],
+  local: [],
+  custom: []
+}
+
+/**
+ * 按识别服务商挑一个同系聊天 provider + 模型；挑不到返回 null（校对跳过）。
+ */
+async function resolveSameProviderModel(ctx, asrProvider) {
+  const llm = ctx.get('llm')
+  if (llm === undefined || llm === null) return null
+  const candidates = SAME_PROVIDER_CANDIDATES[text(asrProvider)] || []
+  if (candidates.length === 0) return null
+  let providers = []
+  try { providers = llm.listProviders() } catch { return null }
+  const ids = providers.map((entry) => text(entry?.provider ?? entry?.id)).filter((id) => id.length > 0)
+  const hit = ids.find((id) => candidates.includes(id)) ||
+    ids.find((id) => candidates.some((name) => id.startsWith(name) || id.includes(name)))
+  if (hit === undefined) return null
+  let models = []
+  try { models = await llm.listModels(hit) } catch { return null }
+  const modelIds = models.map((entry) => text(entry?.id)).filter((id) => id.length > 0)
+  if (modelIds.length === 0) return null
+  const cheap = modelIds.find((id) => /flash|turbo|light|small|air|lite/i.test(id))
+  return { provider: hit, model: cheap || modelIds[0] }
+}
+
+/**
+ * 语音识别的「模型校对」：只做最小纠错（同音字/错字/漏标点），不改写、不回答。
  * 任何异常都退回原文，绝不让校对环节把用户的话改坏。
  */
 async function reviewTranscript(ctx, target, raw, glossary, signal) {
@@ -852,7 +885,10 @@ export function apply(ctx) {
         const reviewMemberId = text(settings.reviewMemberId)
         if (settings.reviewEnabled && value.length > 0 && (reviewProvider.length > 0 || reviewMemberId.length > 0)) {
           let target = null
-          if (reviewProvider.length > 0 && reviewModel.length > 0) {
+          if (reviewProvider === '__same__') {
+            const resolved = await resolveSameProviderModel(ctx, settings.provider)
+            if (resolved !== null) target = resolved
+          } else if (reviewProvider.length > 0 && reviewModel.length > 0) {
             target = { provider: reviewProvider, model: reviewModel }
           } else if (reviewMemberId.length > 0) {
             const store = await loadStore()
