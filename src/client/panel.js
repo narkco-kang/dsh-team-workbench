@@ -286,6 +286,9 @@ window.__ModuleLoader__.load({
       ".ats-mascot.working .ats-mascot-ring{filter:drop-shadow(0 0 5px rgba(251,191,36,.9));animation-duration:1.1s;}",
       ".ats-im-group-stack{display:inline-flex;align-items:center;flex:0 0 auto;min-width:40px;}",
       ".ats-im-head-stack{display:inline-flex;align-items:center;flex:0 0 auto;}",
+      ".ats-im-name-line{display:flex;align-items:center;gap:5px;min-width:0;}",
+      ".ats-im-role{font-size:9.5px;line-height:14px;padding:0 6px;border-radius:6px;background:rgba(127,127,127,.14);color:inherit;opacity:.72;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;}",
+      ".ats-role-chip{display:inline-block;font-size:10px;line-height:15px;padding:0 6px;border-radius:6px;background:rgba(127,127,127,.14);opacity:.8;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
       ".ats-im-head-stack .ats-im-stack-cell{margin-left:-10px;}",
       ".ats-im-stack-cell{margin-left:-9px;border:2px solid var(--dsh-bg,#fff);border-radius:50%;background:var(--dsh-bg,#fff);line-height:0;}",
       ".ats-im-stack-cell:first-child{margin-left:0;}",
@@ -566,8 +569,8 @@ window.__ModuleLoader__.load({
           h("ellipse", { cx: narrow ? 21 : 19, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
           h("ellipse", { cx: narrow ? 43 : 45, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
           mouthNode,
-          h("circle", { cx: 50, cy: 52, r: 6, fill: "#fff", opacity: 0.94 }),
-          h("text", { x: 50, y: 52, textAnchor: "middle", dominantBaseline: "central", fontSize: 7 }, member.emoji || "🤖")
+          h("circle", { cx: 50, cy: 52, r: 7.6, fill: "#fff", opacity: 0.94 }),
+          h("text", { x: 50, y: 52, textAnchor: "middle", dominantBaseline: "central", fontSize: 8.8 }, member.emoji || "🤖")
         )
       );
     }
@@ -720,14 +723,14 @@ window.__ModuleLoader__.load({
             type: "checkbox", checked: props.selected === true, title: "选中以批量操作",
             onChange: function () { props.onSelectToggle(member.id); }
           }),
-          h(Avatar, { member: member, accent: accent, size: 28, state: busy ? "working" : (member.enabled === false ? "sleeping" : "idle") }),
+          h(Avatar, { member: member, accent: accent, size: 44, state: busy ? "working" : (member.enabled === false ? "sleeping" : "idle") }),
           h("div", { className: "ats-id" },
             h("div", { className: "ats-name-line" },
               h("span", { className: "ats-name" }, member.name),
               member.enabled ? null : h("span", { className: "ats-tag" }, "停用"),
               member.roleRef && member.roleRef.id ? h("span", { className: "ats-tag", title: member.roleRef.id }, "角色库") : null
             ),
-            h("div", { className: "ats-role" }, member.role),
+            h("div", { className: "ats-role" }, member.role ? h("span", { className: "ats-role-chip", title: member.role }, member.role) : null),
             h("div", { className: "ats-role", style: { opacity: .6, fontSize: "10.5px" } },
               props.lastActive ? "上次活跃 " + agoText(props.lastActive) : "还没有对话记录",
               props.usage && props.usage.total > 0 ? " · 本机今日派发 " + String(props.usage.today || 0) + " 次" : ""
@@ -1542,9 +1545,12 @@ window.__ModuleLoader__.load({
           key: m.memberId, type: "button", className: "ats-im-row" + (on ? " on" : ""),
           onClick: function () { pickPrivate(m.memberId); }
         },
-          h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 22, state: working ? "working" : "idle" }),
+          h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 38, state: working ? "working" : "idle" }),
           h("span", { className: "ats-im-meta" },
-            h("span", { className: "ats-im-name" }, m.name),
+            h("span", { className: "ats-im-name-line" },
+              h("span", { className: "ats-im-name" }, m.name),
+              m.role ? h("span", { className: "ats-im-role", title: m.role }, m.role) : null
+            ),
             h("span", { className: "ats-im-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")
           )
         );
@@ -1560,7 +1566,7 @@ window.__ModuleLoader__.load({
               var teammate = memberById[memberId];
               if (teammate === undefined) return null;
               return h("span", { key: memberId, className: "ats-im-stack-cell", style: { zIndex: 3 - index } },
-                h(Avatar, { member: { id: teammate.memberId, name: teammate.name, emoji: teammate.emoji, color: teammate.color, enabled: true }, accent: colorOf(teammate, members.indexOf(teammate)), size: 18 })
+                h(Avatar, { member: { id: teammate.memberId, name: teammate.name, emoji: teammate.emoji, color: teammate.color, enabled: true }, accent: colorOf(teammate, members.indexOf(teammate)), size: 24 })
               );
             }),
             (room.memberIds || []).length > 3 ? h("span", { className: "ats-im-stack-more" }, "+" + String(room.memberIds.length - 3)) : null
@@ -1597,12 +1603,12 @@ window.__ModuleLoader__.load({
                         var teammate = memberById[memberId];
                         if (teammate === undefined) return null;
                         return h("span", { key: memberId, className: "ats-im-stack-cell", style: { zIndex: 3 - index } },
-                          h(Avatar, { member: { id: teammate.memberId, name: teammate.name, emoji: teammate.emoji, color: teammate.color, enabled: true }, accent: colorOf(teammate, members.indexOf(teammate)), size: 20 })
+                          h(Avatar, { member: { id: teammate.memberId, name: teammate.name, emoji: teammate.emoji, color: teammate.color, enabled: true }, accent: colorOf(teammate, members.indexOf(teammate)), size: 28 })
                         );
                       }),
                       (currentRoom.memberIds || []).length > 3 ? h("span", { className: "ats-im-stack-more" }, "+" + String(currentRoom.memberIds.length - 3)) : null
                     )
-                  : h(Avatar, { member: { id: currentMember.memberId, name: currentMember.name, emoji: currentMember.emoji, color: currentMember.color, enabled: true }, accent: colorOf(currentMember, members.indexOf(currentMember)), size: 26 }),
+                  : h(Avatar, { member: { id: currentMember.memberId, name: currentMember.name, emoji: currentMember.emoji, color: currentMember.color, enabled: true }, accent: colorOf(currentMember, members.indexOf(currentMember)), size: 36 }),
                 h("div", { className: "ats-im-head-text" },
                   h("div", { className: "ats-im-title" }, title),
                   h("div", { className: "ats-im-sub" }, subtitle || (currentMember ? (currentMember.count > 0 ? currentMember.lastText : "私聊") : ""))
@@ -2154,9 +2160,23 @@ window.__ModuleLoader__.load({
       var setOpen = openState[1];
 
       // 给宿主自己的输入框留出位置：量一下宿主 composer 的高度，把外壳底部让开。
+      // 同时把宿主侧栏收起来，让输入框按整窗居中（否则会偏右一个侧栏宽度）。
       useEffect(function () {
+        var hostSidebar = function (hide) {
+          if (typeof document === "undefined" || typeof document.querySelector !== "function") return;
+          var slot = document.querySelector('[data-slot="sidebar.workspaces"]');
+          if (slot === null) return;
+          var node = slot;
+          for (var i = 0; i < 8 && node !== null && node.parentElement !== null && node !== document.body; i += 1) {
+            var rect = node.getBoundingClientRect();
+            if (rect.width >= 140 && rect.height >= window.innerHeight * 0.6) break;
+            node = node.parentElement;
+          }
+          if (node !== null && node !== document.body) node.style.display = hide ? "none" : "";
+        };
         var sync = function () {
           if (typeof document === "undefined" || typeof window === "undefined") return;
+          hostSidebar(open);
           var card = typeof document.querySelector === "function" ? document.querySelector("[data-composer-card]") : null;
           var bottom = 0;
           if (card !== null && typeof card.getBoundingClientRect === "function") {
@@ -2168,8 +2188,12 @@ window.__ModuleLoader__.load({
         sync();
         window.addEventListener("resize", sync);
         var timer = setInterval(sync, 1500);
-        return function () { window.removeEventListener("resize", sync); clearInterval(timer); };
-      }, []);
+        return function () {
+          window.removeEventListener("resize", sync);
+          clearInterval(timer);
+          hostSidebar(false);
+        };
+      }, [open]);
       if (!open) {
         return h("button", { className: "dta-launcher", type: "button", onClick: function () { setOpen(true); } }, "🧑‍🤝‍🧑 智能体团队");
       }

@@ -356,6 +356,7 @@ export async function chatOverview(ctx) {
       return {
         memberId: member.id,
         name: member.name,
+        role: member.role,
         emoji: member.emoji,
         color: member.color,
         count: thread && Array.isArray(thread.messages) ? thread.messages.length : 0,
