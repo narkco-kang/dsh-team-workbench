@@ -29,6 +29,42 @@ const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
 const GROUP_ROUTE = ROUTE_BASE + '/chats/group'
 const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
 const SEARCH_ROUTE = ROUTE_BASE + '/chats/search'
+/** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
+const CHIEF_ROOM_ID = 'chief-desk'
+const CHIEF_ROOM_NAME = '总管 · 用户对接'
+
+/** 让总管台与会话数据保持一致；返回是否需要写回。 */
+function ensureChiefRoom(chats, store) {
+  const chiefId = text(store.chiefId)
+  if (chiefId.length === 0 || !store.members.some((m) => m.id === chiefId)) return false
+  const memberIds = store.members.filter((m) => m.enabled !== false).map((m) => m.id)
+  if (!memberIds.includes(chiefId)) memberIds.unshift(chiefId)
+  let room = chats.rooms.find((entry) => entry.id === CHIEF_ROOM_ID)
+  if (room === undefined) {
+    chats.rooms.unshift({
+      id: CHIEF_ROOM_ID,
+      name: CHIEF_ROOM_NAME,
+      adminId: chiefId,
+      memberIds,
+      responder: 'lead',
+      relayDepth: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: '',
+      messages: []
+    })
+    return true
+  }
+  let changed = false
+  if (room.adminId !== chiefId) { room.adminId = chiefId; changed = true }
+  if (room.name !== CHIEF_ROOM_NAME) { room.name = CHIEF_ROOM_NAME; changed = true }
+  if (room.responder !== 'lead') { room.responder = 'lead'; changed = true }
+  if (room.relayDepth !== 2) { room.relayDepth = 2; changed = true }
+  if (room.memberIds.length !== memberIds.length || room.memberIds.some((id, index) => id !== memberIds[index])) {
+    room.memberIds = memberIds
+    changed = true
+  }
+  return changed
+}
 
 const CHAT_VERSION = 1
 const MAX_MESSAGES = 200
@@ -346,6 +382,7 @@ export async function searchMessages(query, kind, scopeId, limit) {
 export async function chatOverview(ctx) {
   const store = await loadStore()
   const chats = await loadChats()
+  if (ensureChiefRoom(chats, store)) await saveChats(chats)
   const byId = new Map(store.members.map((m) => [m.id, m]))
   const lastOf = (messages) => (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1] : null)
   return {
@@ -369,6 +406,7 @@ export async function chatOverview(ctx) {
       return {
         id: room.id,
         name: room.name,
+        chief: room.id === CHIEF_ROOM_ID,
         adminId: room.adminId,
         adminName: (byId.get(room.adminId) || {}).name || '',
         memberIds: room.memberIds.filter((id) => byId.has(id)),
@@ -405,6 +443,7 @@ export async function applyRoomAction(body) {
   }
   if (action === 'delete') {
     const id = text(body?.id)
+    if (id === CHIEF_ROOM_ID) return { error: '总管台不能删除；要换总管请到团队页设置' }
     const before = chats.rooms.length
     chats.rooms = chats.rooms.filter((room) => room.id !== id)
     if (chats.rooms.length === before) return { error: '找不到该群聊' }
