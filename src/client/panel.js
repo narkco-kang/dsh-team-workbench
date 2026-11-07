@@ -372,6 +372,12 @@ window.__ModuleLoader__.load({
       ".ats-bubble.agent{align-self:flex-start;}",
       ".ats-bubble-body{display:flex;flex-direction:column;gap:2px;min-width:0;}",
       ".ats-bubble-name{font-size:10.5px;opacity:.6;}",
+      ".ats-msgbar{display:flex;align-items:center;gap:2px;margin-top:2px;opacity:.55;transition:opacity .12s ease;}",
+      ".ats-bubble:hover .ats-msgbar{opacity:1;}",
+      ".ats-msgbtn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:12px;opacity:.75;}",
+      ".ats-msgbtn:hover{background:rgba(127,127,127,.14);opacity:1;}",
+      ".ats-msgbtn.on{background:rgba(77,107,254,.16);color:var(--bt-accent);opacity:1;}",
+      ".ats-msgmeta{font-size:10.5px;opacity:.6;white-space:nowrap;margin-left:4px;font-variant-numeric:tabular-nums;}",
       ".ats-bubble-text{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.55;padding:7px 10px;border-radius:10px;background:rgba(127,127,127,.12);}",
       ".ats-bubble.user .ats-bubble-text{background:var(--dsh-accent,#2563eb);color:#fff;}",
       /* 输入框照 DS-Bot / DSH 会话页：居中卡片、max-width 820、圆角 16、
@@ -2335,6 +2341,63 @@ window.__ModuleLoader__.load({
         setMention({ open: false, query: "", index: 0, start: 0 });
         if (el) setTimeout(function () { el.focus(); el.selectionStart = el.selectionEnd = (before + "@" + pick.name + " ").length; }, 0);
       };
+      // 消息反馈（👍/👎）本地记住；不给后端增加状态。
+      var feedbackState = useState({});
+      var feedback = feedbackState[0];
+      var setFeedback = feedbackState[1];
+      var copyText = function (text, message) {
+        var done = function () { setBanner(message); };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done).catch(done); return; }
+        } catch { /* 回退 */ }
+        try {
+          var area = document.createElement("textarea");
+          area.value = text;
+          document.body.appendChild(area);
+          area.select();
+          document.execCommand("copy");
+          area.remove();
+          done();
+        } catch (error) { setBanner("复制失败：" + String(error && error.message ? error.message : error)); }
+      };
+      // 会话记录快捷键：⌘⇧C 复制最后一条回复、⌘⌥C 复制整段会话、⌘J/⌘K 切下一个/上一个会话、⌘E 记忆、⌘U 聚焦输入框。
+      useEffect(function () {
+        var onKey = function (event) {
+          if (!(event.metaKey || event.ctrlKey)) return;
+          var key = String(event.key || "").toLowerCase();
+          if (event.shiftKey && key === "c") {
+            var last = null;
+            for (var i = messages.length - 1; i >= 0; i -= 1) { if (messages[i].role !== "user") { last = messages[i]; break; } }
+            if (last === null) return;
+            event.preventDefault();
+            copyText(last.text, "已复制最后一条回复（" + String(last.name) + "）。");
+            return;
+          }
+          if (event.altKey && key === "c") {
+            var all = messages.map(function (m) { return "## " + (m.name || m.role) + "\n" + m.text; }).join("\n\n");
+            if (all.length === 0) return;
+            event.preventDefault();
+            copyText(all, "已复制整段会话（" + String(messages.length) + " 条）。");
+            return;
+          }
+          if (key === "j" || key === "k") {
+            var pool = rooms.length > 0 ? rooms.map(function (r) { return { kind: "group", id: r.id }; }) : [];
+            var priv = members.map(function (m) { return { kind: "private", id: m.memberId }; });
+            var list = pool.concat(priv);
+            if (list.length === 0) return;
+            event.preventDefault();
+            var index = target === null ? -1 : list.findIndex(function (item) { return item.kind === target.kind && item.id === target.id; });
+            var next = index < 0 ? 0 : (key === "j" ? (index + 1) % list.length : (index - 1 + list.length) % list.length);
+            var pickItem = list[next];
+            if (pickItem.kind === "group") pickRoom(pickItem.id); else pickPrivate(pickItem.id);
+            return;
+          }
+          if (key === "e") { event.preventDefault(); setMemoryOpen(!memoryOpen); return; }
+          if (key === "u") { event.preventDefault(); if (areaRef && areaRef.current) areaRef.current.focus(); }
+        };
+        window.addEventListener("keydown", onKey);
+        return function () { window.removeEventListener("keydown", onKey); };
+      }, [messages, rooms, members, target, memoryOpen]);
       // 宿主会话的 token / 缓存命中率（来自 DSH session projcache，只读）。
       var statsState = useState(null);
       var sessionStats = statsState[0];
@@ -3340,11 +3403,31 @@ window.__ModuleLoader__.load({
               : messages.map(function (m) {
                   if (m.role === "user") return h("div", { key: m.id, className: "ats-bubble user" }, h("div", { className: "ats-bubble-text" }, m.text));
                   var accent = colorOf(m, 0);
+                  var tokens = Math.max(1, Math.round(String(m.text || "").length / 1.6 / 100) / 10);
+                  var when = "";
+                  try { when = new Date(m.time || Date.now()).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }); } catch { when = ""; }
                   return h("div", { key: m.id, className: "ats-bubble agent" },
                     h(Mascot, { member: { id: m.memberId, name: m.name, emoji: m.emoji }, accent: accent, size: 26 }),
                     h("div", { className: "ats-bubble-body" },
                       h("div", { className: "ats-bubble-name" }, m.name),
-                      h("div", { className: "ats-bubble-text" }, m.text)
+                      h("div", { className: "ats-bubble-text" }, m.text),
+                      h("div", { className: "ats-msgbar" },
+                        h("button", { className: "ats-msgbtn", type: "button", title: "复制这条回复（⌘⇧C 复制最后一条）", "aria-label": "复制", onClick: function () { copyText(m.text, "已复制回复。"); } }, "⧉"),
+                        h("button", {
+                          className: "ats-msgbtn" + (feedback[m.id] === "up" ? " on" : ""), type: "button", title: "有帮助", "aria-label": "赞",
+                          onClick: function () { setFeedback(function (prev) { return Object.assign({}, prev, { [m.id]: prev[m.id] === "up" ? "" : "up" }); }); }
+                        }, "👍"),
+                        h("button", {
+                          className: "ats-msgbtn" + (feedback[m.id] === "down" ? " on" : ""), type: "button", title: "没帮助", "aria-label": "踩",
+                          onClick: function () { setFeedback(function (prev) { return Object.assign({}, prev, { [m.id]: prev[m.id] === "down" ? "" : "down" }); }); }
+                        }, "👎"),
+                        h("button", {
+                          className: "ats-msgbtn", type: "button", title: "引用到输入框", "aria-label": "引用",
+                          onClick: function () { setDraft(function (prev) { return (prev.length > 0 ? prev + "\n" : "") + "> " + String(m.name) + "：" + String(m.text).slice(0, 120) + "\n\n"; }); }
+                        }, "↗"),
+                        h("span", { className: "ats-msgmeta" }, "🗃 用量 " + String(tokens) + "K tok"),
+                        h("span", { className: "ats-msgmeta" }, when)
+                      )
                     )
                   );
                 })

@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.69.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.70.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -49,6 +49,8 @@
 - 打开工作台时就会预取一次概览，第一次进聊天也不用等。
 
 **对话**
+- 每条回复下方有 DSH 式操作条：复制 / 👍 / 👎 / 引用 / 用量 tok / 时间；
+- 会话快捷键：⌘⇧C 复制最后一条回复、⌘⌥C 复制整段会话、⌘J/⌘K 切下一/上一个会话、⌘E 记忆、⌘U 聚焦输入框。
 - 输入框下方有 **token / 缓存命中率统计行**：轮/步、tok/s、总 token、缓存命中%（读宿主 session projcache，5s 刷新）；
 - 输入框左上方有 **DSH 式思考条**：发送后显示「深度求索中，用时 N 秒」、「谁在思考」、已完成步骤（… ✓）与排队人数；
 - 输入框对齐 DSH：多行自动撑高（60–280px）、**@ 补全**（输入 @ 列出可点名成员，↑↓ 选择、Enter/Tab 插入、Esc 关闭）、Enter 发送 / Shift+Enter 换行 / ⌘Enter 也发送、Esc 失焦、录音与发送按钮同排。
@@ -131,17 +133,17 @@
 
 ## 安装
 
-2.69.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.70.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.69.0.tgz
+  plugin --profile web add ./dsh-team-workbench-2.70.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.69.0/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.70.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -151,7 +153,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.69.0**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.70.0**，否则两套入口会同时存在。
 
 ## 包结构
 
