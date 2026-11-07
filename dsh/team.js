@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.90.0'
+const PLUGIN_VERSION = '2.91.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -848,7 +848,9 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
 
 /** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
 export async function runAnyMember(ctx, parent, member, task, signal, hooks) {
-  if (member.department !== null && member.department !== undefined && member.department.subAgents.length > 0) {
+  // 采用 DS-Bot 群组架构后，部门成员也按普通成员执行；
+  // 子智能体由群聊 @ 触发，不再在部门内部扇出。
+  if (false && member.department !== null && member.department !== undefined && member.department.subAgents.length > 0) {
     return runDepartmentMember(ctx, parent, member, task, signal, hooks)
   }
   return dispatchToMember(ctx, parent, member, task, signal)
