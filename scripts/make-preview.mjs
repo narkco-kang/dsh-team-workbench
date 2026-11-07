@@ -117,7 +117,7 @@ window.fetch = function (url, init) {
     } else {
       trail.push({ name: current, phase: 'thinking', ms: 0, emoji: emojiOf[current] || '🤖' });
     }
-    data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: parallelNames.length > 0 ? '' : current, parallel: parallelNames, steps: trail, finishedAt: '' } };
+    data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: parallelNames.length > 0 ? '' : current, parallel: parallelNames, queued: parallelNames.length > 0 ? ['审核员', '复核员'] : [], steps: trail, finishedAt: '' } };
     return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
   }
   if (init && String(init.method || '').toUpperCase() === 'POST' && (u.indexOf('/api/team-workbench/chats/private') === 0 || u.indexOf('/api/team-workbench/chats/group') === 0)) {

@@ -353,6 +353,16 @@ function pickAutoResponder(userText, members, exclude) {
   return bestScore >= 2 ? best : null
 }
 
+/**
+ * 并发上限：显式设置优先（1-5）；没设就按成员数自动取 3-5。
+ * 2-6 人 → 3，7-8 人 → 4，9 人以上 → 5。
+ */
+export function resolveMaxParallel(room, memberCount) {
+  const configured = Number(room?.maxParallel)
+  if (Number.isSafeInteger(configured) && configured >= 1 && configured <= 5) return configured
+  return Math.max(3, Math.min(5, Math.ceil(Math.max(1, memberCount) / 2)))
+}
+
 /** 群聊：按应答模式选人，管理员可 @ 指派，成员之间按接力层数继续。 */
 export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const chats = await loadChats()
@@ -364,7 +374,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const memory = await loadMemory()
   pushMessage(target.messages, messageOf('user', null, userText))
   // 过程化状态：前端轮询 progress，看到「现在轮到谁」和已经跑完的每一棒。
-  target.progress = { startedAt: new Date().toISOString(), current: '', parallel: [], steps: [], finishedAt: '' }
+  target.progress = { startedAt: new Date().toISOString(), current: '', parallel: [], queued: [], steps: [], finishedAt: '' }
   await saveChats(chats)
 
   const responder = responderOf(target)
@@ -392,7 +402,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   // 参考 dsh-superagent 的「worker slot + 并发启动」：同一层的成员各自一个子会话并行跑，
   // 用并发上限（默认 3）控制 slot；管理员那一棒仍然先跑，因为要由它决定派给谁。
   const parallelOn = target.parallel !== false
-  const maxParallel = Math.max(1, Math.min(5, Number(target.maxParallel) || 3))
+  const maxParallel = resolveMaxParallel(target, alive.length)
   if (!Array.isArray(target.progress.parallel)) target.progress.parallel = []
   // 并发完成时各自都会改 chats，统一串行落盘，避免互相覆盖。
   let saveChain = Promise.resolve()
@@ -409,6 +419,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     const step = { name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0, emoji: member.emoji }
     target.progress.steps.push(step)
     if (target.progress.parallel.length < 2) target.progress.current = member.name
+    else target.progress.current = ''
     await persist()
     const raw = await runMember(ctx, parent, member, prompt, signal)
     const reply = { ...raw, text: stripReceipts(raw.text) }
@@ -424,15 +435,22 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const runBatch = async (batch, depth, lastSpeaker) => {
     const results = new Array(batch.length)
     let cursor = 0
+    // 超出并发的成员进队列，状态条显示「排队 N 位」。
+    target.progress.queued = batch.map((member) => member.name)
     const lane = async () => {
       while (cursor < batch.length) {
         const index = cursor
         cursor += 1
-        results[index] = await runTurn(batch[index], depth, lastSpeaker)
+        const member = batch[index]
+        target.progress.queued = target.progress.queued.filter((name) => name !== member.name)
+        target.progress.parallel = target.progress.parallel.concat(member.name)
+        await persist()
+        results[index] = await runTurn(member, depth, lastSpeaker)
       }
     }
     const lanes = Math.min(parallelOn ? maxParallel : 1, batch.length)
     await Promise.all(Array.from({ length: lanes }, lane))
+    target.progress.queued = []
     return results.filter((entry) => entry !== undefined)
   }
 
@@ -445,7 +463,6 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     const batch = queue.filter((member) => !used.has(member.id)).slice(0, room)
     if (batch.length === 0) break
     for (const member of batch) used.add(member.id)
-    target.progress.parallel = batch.length > 1 ? batch.map((member) => member.name) : []
     await persist()
     const results = await runBatch(batch, depth, lastSpeaker)
     target.progress.parallel = []
@@ -573,8 +590,10 @@ export async function applyRoomAction(body) {
     const relayValue = Number(body?.room?.relayDepth)
     const relayDepth = Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2 ? relayValue : 1
     const parallel = body?.room?.parallel !== false
-    const maxParallel = Math.max(1, Math.min(5, Number(body?.room?.maxParallel) || 3))
+    const configured = Number(body?.room?.maxParallel)
+    const maxParallel = Number.isSafeInteger(configured) && configured >= 1 && configured <= 5 ? configured : undefined
     const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, parallel, maxParallel, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
+    if (maxParallel === undefined) delete room.maxParallel
     chats.rooms.push(room)
     await saveChats(chats)
     return { room }
@@ -605,8 +624,13 @@ export async function applyRoomAction(body) {
     const relayValue = Number(body?.room?.relayDepth)
     if (Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2) room.relayDepth = relayValue
     if (body?.room?.parallel !== undefined) room.parallel = body.room.parallel !== false
-    const parallelValue = Number(body?.room?.maxParallel)
-    if (Number.isSafeInteger(parallelValue) && parallelValue >= 1 && parallelValue <= 5) room.maxParallel = parallelValue
+    const parallelRaw = body?.room?.maxParallel
+    if (parallelRaw === null || parallelRaw === '' || parallelRaw === 'auto') {
+      delete room.maxParallel
+    } else {
+      const parallelValue = Number(parallelRaw)
+      if (Number.isSafeInteger(parallelValue) && parallelValue >= 1 && parallelValue <= 5) room.maxParallel = parallelValue
+    }
     await saveChats(chats)
     return { room }
   }

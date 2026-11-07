@@ -1595,6 +1595,18 @@ window.__ModuleLoader__.load({
         el.style.height = Math.min(280, Math.max(64, el.scrollHeight)) + "px";
       }, [draft, target]);
 
+      var sttErrorText = function (error) {
+        var raw = String(error && error.message ? error.message : error);
+        var base = (sttSettings && sttSettings.baseUrl) || "http://127.0.0.1:9977";
+        if (raw.indexOf("fetch failed") >= 0 || raw.indexOf("Failed to fetch") >= 0 || raw.indexOf("ECONNREFUSED") >= 0) {
+          return "本地语音服务没启动（" + base + "）。在 stt 目录执行 ./venv/bin/python start.py，或点「语音」改地址";
+        }
+        if (raw.indexOf("STT HTTP 404") >= 0) return "地址不对：这里需要一个能处理 /api 的 stt 服务（当前 " + base + "）";
+        if (raw.indexOf("音频为空") >= 0) return "没录到声音：检查系统麦克风权限，或说话时离麦近一点";
+        if (raw.indexOf("没有识别到内容") >= 0) return raw;
+        return raw.length > 120 ? raw.slice(0, 120) + "…" : raw;
+      };
+
       // 浏览器识别：本地 STT 不可用时的回退路径。
       var startWebSpeech = function () {
         var SR = typeof window === "undefined" ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -1612,7 +1624,17 @@ window.__ModuleLoader__.load({
           if (spoken.length === 0) return;
           setDraft(function (prev) { return prev + spoken; });
         };
-        rec.onerror = function (event) { setMicOn(false); setBanner("语音识别失败：" + String(event.error || "")); };
+        rec.onerror = function (event) {
+          setMicOn(false);
+          var code = String(event.error || "");
+          var friendly = code === "not-allowed" || code === "service-not-allowed"
+            ? "麦克风权限被拒绝：在系统设置里允许 DSH Desktop 使用麦克风；也可以点「语音」接本地 STT"
+            : code === "no-speech" ? "没听到声音，再点一次麦克风说话"
+            : code === "network" ? "浏览器识别需要联网；可改用本地 STT（点「语音」）"
+            : code === "audio-capture" ? "没有可用的麦克风设备"
+            : "语音识别失败：" + code;
+          setBanner(friendly);
+        };
         rec.onend = function () { setMicOn(false); };
         try {
           rec.start();
@@ -1651,7 +1673,7 @@ window.__ModuleLoader__.load({
               setDraft(function (prev) { return prev.length > 0 ? prev + " " + value : value; });
             }).catch(function (error) {
               var msg = String(error && error.message ? error.message : error);
-              setBanner("本地 STT 不可用（" + msg + "），已回退浏览器识别");
+              setBanner("本地 STT 不可用：" + sttErrorText(error) + "；已回退浏览器识别");
               startWebSpeech();
             }).then(function () { setSttBusy(false); });
           };
@@ -1659,8 +1681,13 @@ window.__ModuleLoader__.load({
           setMicOn(true);
           setBanner("");
         }).catch(function (error) {
+          var name = String(error && error.name ? error.name : "");
           var msg = String(error && error.message ? error.message : error);
-          setBanner("无法访问麦克风（" + msg + "），改用浏览器识别");
+          if (name === "NotAllowedError" || name === "SecurityError" || msg.indexOf("Permission") >= 0) {
+            setBanner("麦克风权限被拒绝：在系统设置里允许 DSH Desktop 使用麦克风；也可以点「语音」接本地 STT");
+            return;
+          }
+          setBanner("拿不到麦克风（" + msg + "），改用浏览器识别");
           startWebSpeech();
         });
       };
@@ -1831,7 +1858,7 @@ window.__ModuleLoader__.load({
       var openForm = function () {
         var members = data.private || [];
         var chiefMember = members.filter(function (m) { return m.memberId === chiefId; })[0];
-        setForm({ name: "", adminId: chiefMember ? chiefMember.memberId : members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1, parallel: true, maxParallel: 3 });
+        setForm({ name: "", adminId: chiefMember ? chiefMember.memberId : members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1, parallel: true, maxParallel: undefined });
       };
       var submitForm = function () {
         if (form === null) return;
@@ -1865,7 +1892,8 @@ window.__ModuleLoader__.load({
       var title = currentMember ? currentMember.name : currentRoom ? currentRoom.name : "";
       var responderLabel = currentRoom ? (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "只回应 @" : "管理员先答") : "";
       var relayDepth = currentRoom && typeof currentRoom.relayDepth === "number" ? currentRoom.relayDepth : 1;
-      var parallelLabel = currentRoom ? (currentRoom.parallel === false ? "串行" : "并行 " + String(currentRoom.maxParallel || 3)) : "";
+      var autoParallel = (function (count) { return Math.max(3, Math.min(5, Math.ceil(Math.max(1, count) / 2))); })(currentRoom ? currentRoom.memberIds.length : 3);
+      var parallelLabel = currentRoom ? (currentRoom.parallel === false ? "串行" : "并行 " + (currentRoom.maxParallel ? String(currentRoom.maxParallel) : "自动(" + String(autoParallel) + ")")) : "";
       var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员 · " + responderLabel + " · 接力 " + String(relayDepth) + " 层 · " + parallelLabel : "";
 
       var memberById = {};
@@ -2029,6 +2057,9 @@ window.__ModuleLoader__.load({
                           ? h("span", { key: "hint", className: "ats-thinking-hint" },
                               " · " + (currentRoom.memberIds.length > 7 ? "随后按需 @ 成员接力" : "随后最多 @ " + (currentRoom.memberIds.length - 1) + " 位成员接力"))
                           : null),
+                    thinkingProgress && Array.isArray(thinkingProgress.queued) && thinkingProgress.queued.length > 0
+                      ? h("span", { key: "queue", className: "ats-thinking-hint" }, " · 排队 " + String(thinkingProgress.queued.length) + " 位")
+                      : null,
                     h("span", { key: "sec", className: "ats-thinking-sec" }, thinkingSeconds >= 3 ? " · " + thinkingSeconds + "s" : "")
                   ]
                 : null
@@ -2051,7 +2082,7 @@ window.__ModuleLoader__.load({
               }),
               h("div", { className: "ats-composer-bar" },
                 h("button", { className: "ats-round", type: "button", title: "新建群聊", "aria-label": "新建群聊", onClick: openForm }, "＋"),
-                h("button", { className: "ats-round" + (micOn ? " recording" : ""), type: "button", title: "语音输入：点一下开始录音，再点一下结束并转写", "aria-label": "语音输入", disabled: target === null || sttBusy, onClick: toggleVoice }, micOn ? "●" : "🎤"),
+                h("button", { className: "ats-round" + (micOn ? " recording" : ""), type: "button", title: "语音输入：点一下开始录音，再点一下结束并转写", "aria-label": "语音输入", disabled: sttBusy, onClick: toggleVoice }, micOn ? "●" : "🎤"),
                 micOn ? h("span", { className: "ats-sub", style: { fontSize: "11px" } }, "● 录音 " + String(recSeconds) + "s · 再点结束") : null,
                 sttBusy ? h("span", { className: "ats-sub", style: { fontSize: "11px" } }, "识别中…") : null,
                 h("span", { className: "ats-spacer" }),
@@ -2245,8 +2276,8 @@ window.__ModuleLoader__.load({
                   }),
                   "并行"
                 ),
-                h("select", { className: "ats-select", style: { flex: "0 0 96px" }, value: String(form.maxParallel || 3), onChange: function (e) { setForm(Object.assign({}, form, { maxParallel: Number(e.target.value) })); } },
-                  [1, 2, 3, 4, 5].map(function (n) { return h("option", { key: n, value: String(n) }, "并发 " + n); })
+                h("select", { className: "ats-select", style: { flex: "0 0 110px" }, value: form.maxParallel === undefined ? "auto" : String(form.maxParallel), onChange: function (e) { setForm(Object.assign({}, form, { maxParallel: e.target.value === "auto" ? undefined : Number(e.target.value) })); } },
+                  [{ value: "auto", label: "并发：自动" }].concat([1, 2, 3, 4, 5].map(function (n) { return { value: String(n), label: "并发 " + n }; })).map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 )
               ),
               h("div", { className: "ats-check-list" },
