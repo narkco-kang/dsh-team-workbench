@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.66.0'
+const PLUGIN_VERSION = '2.66.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1546,7 +1546,9 @@ async function applyMemberAction(store, body, ctx) {
     const dept = store.members.find((m) => m.id === deptId && m.department !== null)
     if (dept === undefined) return '找不到部门智能体'
     const rows = Array.isArray(body.subs) ? body.subs : []
-    const subs = rows.map((row) => normalizeSubAgent(row, 0)).filter((sub) => sub.name.length > 0)
+    const deptNames = new Set(store.members.filter((m) => m.department !== null).map((m) => m.name))
+    const subs = rows.map((row) => normalizeSubAgent(row, 0))
+      .filter((sub) => sub.name.length > 0 && sub.name !== dept.name && !(deptNames.has(sub.name) && sub.name !== dept.name))
     if (subs.length === 0) return '部门至少保留 1 个子智能体'
     dept.department = { name: dept.department.name, subAgents: subs }
     dept.role = '部门智能体 · ' + String(subs.length) + ' 个子智能体'
@@ -1563,6 +1565,17 @@ async function applyMemberAction(store, body, ctx) {
     if (member === undefined) return '找不到要加入的成员'
     if (dept.id === member.id) return '不能把部门加进它自己'
     if (dept.department.subAgents.some((sub) => sub.name === member.name)) return '该成员已在部门里'
+    // 部门不能再嵌套部门：把它的子智能体平铺进来，然后删掉这层壳，避免自引用/递归。
+    if (member.department !== null && member.department !== undefined) {
+      for (const sub of member.department.subAgents) {
+        if (sub.name === dept.name || dept.department.subAgents.some((item) => item.name === sub.name)) continue
+        dept.department.subAgents.push(Object.assign({}, sub, { id: makeId('sub') }))
+      }
+      dept.role = '部门智能体 · ' + String(dept.department.subAgents.length) + ' 个子智能体'
+      store.members = store.members.filter((m) => m.id !== memberId)
+      if (store.chiefId === memberId) store.chiefId = ''
+      return null
+    }
     const route = (member.routes || [])[0]
     dept.department.subAgents.push({
       id: makeId('sub'),
@@ -1583,8 +1596,8 @@ async function applyMemberAction(store, body, ctx) {
   if (action === 'dept-create') {
     const ids = (Array.isArray(body.ids) ? body.ids : []).map(text).filter((id) => id.length > 0)
     if (ids.length < 2) return '至少需要 2 个成员才能组成部门'
-    const picked = store.members.filter((m) => ids.includes(m.id))
-    if (picked.length < 2) return '找不到足够的成员'
+    const picked = store.members.filter((m) => ids.includes(m.id) && (m.department === null || m.department === undefined))
+    if (picked.length < 2) return '至少需要 2 个普通成员；部门智能体不能再次组队（请把它拆开或直接拖进目标部门）'
     const subs = picked.map((member) => {
       const route = (member.routes || [])[0]
       return {
