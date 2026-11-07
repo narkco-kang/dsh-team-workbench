@@ -71,11 +71,11 @@ check('inject 含 connection 与 tools', mod.inject.includes('connection') && mo
 // —— 首次挂载 ——
 const first = makeCtx()
 const dispose = mod.apply(first.ctx, {})
-check('首次挂载运行时注册了 11 个工具', first.tools.length === 11, String(first.tools.length))
+check('首次挂载运行时注册了 12 个工具', first.tools.length === 12, String(first.tools.length))
 
 const toolNames = first.tools.map((t) => t.name)
 const EXPECTED = [
-  'agent_team_roster', 'agent_team_dispatch', 'agent_team_task', 'agent_team_roles', 'agent_team_chat', 'agent_team_group_chat',
+  'agent_team_roster', 'agent_team_dispatch', 'agent_team_task', 'agent_team_roles', 'agent_team_chat', 'agent_team_group_chat', 'agent_team_group_create',
   'skill_manager_list', 'skill_manager_read', 'skill_manager_save', 'skill_manager_delete', 'skill_manager_deploy'
 ]
 check('工具名与契约完全一致', EXPECTED.every((n) => toolNames.includes(n)) && toolNames.length === EXPECTED.length, toolNames.join(', '))
@@ -94,7 +94,7 @@ check('没有残留旧插件路由前缀（agent-team-studio / skill-manager）'
   !routePaths.some((p) => p.includes('/api/agent-team-studio') || p.includes('/api/skill-manager')))
 check('只挂了一个 ctx.effect（释放钩子）', first.effects.length === 1, String(first.effects.length))
 check('释放钩子可执行', first.effects.length === 1 && typeof first.effects[0] === 'function')
-check('挂载期间 11 个工具都是活的', first.liveTools.size === 11, String(first.liveTools.size))
+check('挂载期间 12 个工具都是活的', first.liveTools.size === 12, String(first.liveTools.size))
 check('挂载期间 26 条路由都是活的', first.liveRoutes.size === 26, String(first.liveRoutes.size))
 
 // —— 释放 ——
@@ -106,9 +106,9 @@ check('释放后路由登记表为空', first.liveRoutes.size === 0, [...first.l
 // —— 重新挂载（热重载场景）：不应留下重复登记 ——
 const second = makeCtx()
 const dispose2 = mod.apply(second.ctx, {})
-check('重新挂载后工具数仍是 11（无累积）', second.tools.length === 11, String(second.tools.length))
+check('重新挂载后工具数仍是 12（无累积）', second.tools.length === 12, String(second.tools.length))
 check('重新挂载后路由数仍是 26（无累积）', second.routes.length === 26, String(second.routes.length))
-check('重新挂载后工具名没有重复', new Set(second.tools.map((t) => t.name)).size === 11)
+check('重新挂载后工具名没有重复', new Set(second.tools.map((t) => t.name)).size === 12)
 dispose2()
 check('第二次释放后登记表也为空', second.liveTools.size === 0 && second.liveRoutes.size === 0, String(second.liveTools.size) + '/' + String(second.liveRoutes.size))
 
@@ -118,4 +118,4 @@ if (failures.length > 0) {
   for (const f of failures) console.error('  - ' + f)
   process.exit(1)
 }
-console.log('服务端冒烟测试全部通过（运行时实际注册 11 工具 / 26 路由，释放后登记表清空）')
+console.log('服务端冒烟测试全部通过（运行时实际注册 12 工具 / 26 路由，释放后登记表清空）')

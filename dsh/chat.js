@@ -1290,7 +1290,45 @@ function registerChatTools(ctx) {
     }
   }
 
-  const disposers = [ctx.tools.register(chat), ctx.tools.register(groupChat)]
+  const groupCreate = {
+    name: 'agent_team_group_create',
+    description: '新建一个群聊：把指定成员（默认全部启用成员）拉进群；建完可以直接用 agent_team_group_chat 说话。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name'],
+      properties: {
+        name: { type: 'string', description: '群聊名称（最多 40 字）。' },
+        memberIds: { type: 'array', items: { type: 'string' }, description: '成员 id 列表；省略则拉全部启用成员。' }
+      }
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['group', 'memberIds'],
+        properties: {
+          group: { type: 'string' },
+          memberIds: { type: 'array', items: { type: 'string' } }
+        }
+      },
+      render: (_args, value) => [{ type: 'text', text: '已建群「' + value.group + '」，成员 ' + String(value.memberIds.length) + ' 名。' }]
+    },
+    async execute(args) {
+      const name = text(args?.name).slice(0, 40)
+      if (name.length === 0) throw new Error('群名不能为空')
+      const store = await loadStore()
+      const enabled = store.members.filter((entry) => entry.enabled !== false).map((entry) => entry.id)
+      const requested = Array.isArray(args?.memberIds) ? args.memberIds.map(text).filter((id) => enabled.includes(id)) : []
+      const memberIds = requested.length > 0 ? requested : enabled
+      if (memberIds.length < 2) throw new Error('群聊至少需要 2 名启用成员（当前团队只有 ' + String(enabled.length) + ' 名）')
+      const result = await applyRoomAction({ action: 'create', room: { name, memberIds, adminId: memberIds[0] } })
+      if (result.error !== undefined) throw new Error(result.error)
+      return { group: result.room.name, memberIds: result.room.memberIds }
+    }
+  }
+
+  const disposers = [ctx.tools.register(chat), ctx.tools.register(groupChat), ctx.tools.register(groupCreate)]
   return () => {
     for (const dispose of disposers) {
       try { dispose() } catch { /* 已释放 */ }

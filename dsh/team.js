@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.71.6'
+const PLUGIN_VERSION = '2.72.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -504,7 +504,8 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // persona 字段是宿主的系统提示；个别 provider/路由（实测 claude 系）不消费它，
   // 子智能体就自称「通用编码智能体」。所以同一份身份也写进 prompt 开头，双通道保证生效。
   const roleHeader = '【角色】你是团队中的「' + member.name + '」，职责：' + member.role + '。' +
-    (member.instructions.trim().length > 0 ? '\n【角色说明】' + member.instructions.trim() : '')
+    (member.instructions.trim().length > 0 ? '\n【角色说明】' + member.instructions.trim() : '') +
+    '\n【输出要求】直接给出结论与依据，不要写代码；若确实需要调用 run_code，请使用 ES module 语法（import / await），不要用 require。'
   const request = {
     label: member.name + ' · ' + routeLabel(route),
     prompt: [{ type: 'text', text: roleHeader + '\n\n【任务】\n' + task }],
@@ -646,7 +647,8 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
       '用户任务：',
       task,
       '',
-      '只给结论、依据和风险，不要寒暄，也不要重复任务原文。'
+      '只给结论、依据和风险，不要寒暄，也不要重复任务原文。',
+      '不需要写代码；若必须调用 run_code，请用 ES module 语法（import / await），不要用 require。'
     ].filter((line) => line.length > 0).join('\n')
     try {
       const result = await dispatchToMember(ctx, parent, target, prompt, signal)
