@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.84.0 — 2026-11-08
+
+- 部门子智能体可以直接进群：群成员 id 支持 sub:<子智能体 id>，
+  派发时自动映射为成员；@ 菜单、新建群表单、概览名字都支持；
+- agent_team_group_create 与 /chats/rooms 都接受 sub: 成员；
+- 新增 test/room-subs.test.mjs（3 项）。
+
 ## 2.83.1 — 2026-11-08
 
 - 急修：2.83.0 给成员加了 sourcePlatform 但没在 MEMBER_SCHEMA 声明，

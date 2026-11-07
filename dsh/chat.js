@@ -25,6 +25,7 @@ import {
   readJson,
   saveStore,
   setSteerTarget,
+  subAgentAsMember,
   steerActive,
   clearSteerTarget,
   text
@@ -287,7 +288,21 @@ export function privatePrompt(member, messages, userText, memoryText) {
 }
 
 function groupRoster(room, members) {
-  const alive = members.filter((m) => room.memberIds.includes(m.id))
+  // 群成员 id 可以是顶层成员，也可以是 'sub:<子智能体 id>'（部门子智能体直接进群）。
+  const alive = []
+  for (const id of room.memberIds) {
+    if (id.startsWith('sub:')) {
+      const subId = id.slice(4)
+      const owner = members.find((m) => Array.isArray(m.department?.subAgents) && m.department.subAgents.some((s) => s.id === subId))
+      if (owner === undefined) continue
+      const index = owner.department.subAgents.findIndex((s) => s.id === subId)
+      if (index < 0) continue
+      alive.push(subAgentAsMember(owner, owner.department.subAgents[index], index))
+      continue
+    }
+    const found = members.find((m) => m.id === id)
+    if (found !== undefined) alive.push(found)
+  }
   const admin = alive.find((m) => m.id === room.adminId) || alive[0]
   return { alive, admin }
 }
@@ -752,6 +767,19 @@ export async function chatOverview(ctx) {
   const chats = await loadChats()
   if (ensureChiefRoom(chats, store)) await saveChats(chats)
   const byId = new Map(store.members.map((m) => [m.id, m]))
+  // 子智能体也能是群成员：'sub:<id>' → 名字/表情/所属部门。
+  const subById = new Map()
+  for (const member of store.members) {
+    for (const sub of member.department?.subAgents ?? []) {
+      subById.set('sub:' + sub.id, { id: 'sub:' + sub.id, name: sub.name, emoji: sub.emoji, owner: member.name, sub: true })
+    }
+  }
+  const nameOf = (id) => {
+    const direct = byId.get(id)
+    if (direct !== undefined) return direct.name
+    const sub = subById.get(id)
+    return sub !== undefined ? sub.name : ''
+  }
   let roleCats = new Map()
   let roleCatsByName = new Map()
   try {
@@ -791,15 +819,21 @@ export async function chatOverview(ctx) {
         name: room.name,
         chief: room.id === CHIEF_ROOM_ID,
         adminId: room.adminId,
-        adminName: (byId.get(room.adminId) || {}).name || '',
-        memberIds: room.memberIds.filter((id) => byId.has(id)),
+        adminName: nameOf(room.adminId),
+        memberIds: room.memberIds.filter((id) => byId.has(id) || subById.has(id)),
+        members: room.memberIds
+          .map((id) => (byId.get(id) !== undefined
+            ? { id, name: byId.get(id).name, emoji: byId.get(id).emoji, sub: false }
+            : subById.get(id)))
+          .filter((entry) => entry !== undefined),
         responder: responderOf(room),
         relayDepth: relayDepthOf(room),
         count: Array.isArray(room.messages) ? room.messages.length : 0,
         lastText: last ? last.text.slice(0, 120) : '',
         updatedAt: room.updatedAt || ''
       }
-    })
+    }),
+    subAgents: [...subById.values()]
   }
 }
 
@@ -809,6 +843,10 @@ export async function applyRoomAction(body) {
   const store = await loadStore()
   const action = text(body?.action) || 'create'
   const known = new Set(store.members.map((m) => m.id))
+  // 部门子智能体也能直接进群：id 形如 sub:<子智能体 id>。
+  for (const member of store.members) {
+    for (const sub of member.department?.subAgents ?? []) known.add('sub:' + sub.id)
+  }
   if (action === 'create') {
     if (chats.rooms.length >= MAX_ROOMS) return { error: '群聊最多 ' + String(MAX_ROOMS) + ' 个' }
     const name = text(body?.room?.name).slice(0, 40)
@@ -1523,7 +1561,13 @@ function registerChatTools(ctx) {
       if (name.length === 0) throw new Error('群名不能为空')
       const store = await loadStore()
       const enabled = store.members.filter((entry) => entry.enabled !== false).map((entry) => entry.id)
-      const requested = Array.isArray(args?.memberIds) ? args.memberIds.map(text).filter((id) => enabled.includes(id)) : []
+      // 子智能体也能直接进群：允许 sub:<id>，只要它确实属于某个部门。
+      const subIds = new Set()
+      for (const member of store.members) {
+        for (const sub of member.department?.subAgents ?? []) subIds.add('sub:' + sub.id)
+      }
+      const allowed = new Set([...enabled, ...subIds])
+      const requested = Array.isArray(args?.memberIds) ? args.memberIds.map(text).filter((id) => allowed.has(id)) : []
       const memberIds = requested.length > 0 ? requested : enabled
       if (memberIds.length < 2) throw new Error('群聊至少需要 2 名启用成员（当前团队只有 ' + String(enabled.length) + ' 名）')
       const result = await applyRoomAction({ action: 'create', room: { name, memberIds, adminId: memberIds[0] } })
