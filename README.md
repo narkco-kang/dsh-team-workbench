@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.22.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.23.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -46,17 +46,17 @@
 
 ## 安装
 
-2.22.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.23.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.22.0.tgz
+  plugin --profile web add ./dsh-team-workbench-2.23.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.22.0/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.23.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -66,7 +66,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.22.0**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.23.0**，否则两套入口会同时存在。
 
 ## 包结构
 
@@ -149,9 +149,19 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.wenkang.stt.plist
 2. `start.py` 的 `_api_process` 加进程内模型缓存（原实现每个请求都重建 WhisperModel，
    单次 20-40s）；加了缓存后 medium 才降到 5-7s。
 
-也可以切到 **OpenAI 兼容模式**（面板里「本地 stt / OpenAI 兼容接口」）：填任意
-`/audio/transcriptions` 端点（whisper-1 等），准确率通常高于本地 tiny；本地 stt 自带的
-`/v1` 也能当这个模式用。
+### 转写服务商（不必只用 OpenAI）
+
+「语音」面板里可选，切换时自动带出默认地址与模型：
+
+| 服务商 | 协议 | 默认地址 / 模型 |
+| --- | --- | --- |
+| 本地 stt | `POST {base}/api`，multipart | `http://127.0.0.1:9977` / `medium` |
+| OpenAI Whisper | `POST {base}/audio/transcriptions` | `https://api.openai.com/v1` / `whisper-1` |
+| 智谱 GLM-ASR | 同上（OpenAI 兼容） | `https://open.bigmodel.cn/api/paas/v4` / `glm-asr-2512` |
+| MiniMax ASR | `POST {base}/speech_to_text` + `language` 头 | `https://api.minimax.chat/v1` / `asr-1.0` |
+| 自定义 OpenAI 兼容 | 同上 | 自填 |
+
+API Key 只存本机 `stt-settings.json`，接口只回「是否已配置」，不回明文。
 
 ## 数据位置
 

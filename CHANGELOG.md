@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2.23.0 — 2026-11-07
+
+- 语音识别从「本地 / OpenAI 兼容二选一」改成**转写服务商选择**：
+  本地 stt、OpenAI Whisper、智谱 GLM-ASR（glm-asr-2512）、MiniMax ASR（asr-1.0）、自定义 OpenAI 兼容；
+- 每种服务商各自协议已实现并验证：
+  - OpenAI / 智谱 / 自定义 → POST {base}/audio/transcriptions（multipart，Bearer）
+  - MiniMax → POST {base}/speech_to_text（multipart + language 头，回 {text}）
+  - 本地 stt → POST {base}/api（回 {code,data}）
+- 切换服务商自动带出默认地址与模型；API Key 只存本地、接口只回「是否已配置」；
+- 用假服务端验证了 MiniMax / 智谱两条协议（路径、language 头、Bearer、响应解析）。
+
 ## 2.22.0 — 2026-11-07
 
 - 识别率：默认模型 tiny → medium（本地 faster-whisper），实测同一句

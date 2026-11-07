@@ -39,7 +39,7 @@ import {
   searchMemoryHybrid,
   slotOf
 } from './memory.js'
-import { loadSttSettings, probeStt, saveSttSettings, transcribe } from './stt.js'
+import { loadSttSettings, probeStt, providerPresets, saveSttSettings, transcribe } from './stt.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -771,7 +771,7 @@ export function apply(ctx) {
           const probe = url.searchParams.get('probe') === '1' ? await probeStt(settings) : null
           // apiKey 只回「有没有配」，不回明文。
           const safe = { ...settings, apiKey: '', apiKeyConfigured: settings.apiKey.length > 0 }
-          return json({ ok: true, settings: safe, probe })
+          return json({ ok: true, settings: safe, providers: providerPresets(), probe })
         }
         const type = String(request.headers.get('content-type') || '')
         if (type.includes('application/json')) {

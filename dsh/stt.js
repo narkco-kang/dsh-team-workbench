@@ -14,17 +14,35 @@ import { dirname, join } from 'node:path'
 import { harnessHome, text } from './team.js'
 
 const SETTINGS_FILE = 'stt-settings.json'
+/**
+ * 转写服务预设：不绑定某一家。
+ * protocol:
+ *   local    → 本地 stt 的 /api（multipart，回 {code,data}）
+ *   openai   → /audio/transcriptions（OpenAI 及兼容方：GLM-ASR、SiliconFlow、Groq、本地 stt /v1…）
+ *   minimax  → /speech_to_text（MiniMax，multipart + language 头，回 {text}）
+ */
+const PROVIDERS = {
+  local: { label: '本地 stt（faster-whisper）', protocol: 'local', apiBase: 'http://127.0.0.1:9977', apiModel: 'medium' },
+  openai: { label: 'OpenAI Whisper', protocol: 'openai', apiBase: 'https://api.openai.com/v1', apiModel: 'whisper-1' },
+  glm: { label: '智谱 GLM-ASR', protocol: 'openai', apiBase: 'https://open.bigmodel.cn/api/paas/v4', apiModel: 'glm-asr-2512' },
+  minimax: { label: 'MiniMax ASR', protocol: 'minimax', apiBase: 'https://api.minimax.chat/v1', apiModel: 'asr-1.0' },
+  custom: { label: '自定义 OpenAI 兼容', protocol: 'openai', apiBase: '', apiModel: '' }
+}
+
+export function providerPresets() {
+  return Object.keys(PROVIDERS).map((id) => ({ id, label: PROVIDERS[id].label, protocol: PROVIDERS[id].protocol, apiBase: PROVIDERS[id].apiBase, apiModel: PROVIDERS[id].apiModel }))
+}
+
 const DEFAULT_SETTINGS = {
   enabled: true,
-  // local = 转发给本地 stt；openai = 直接调任意 OpenAI 兼容 /audio/transcriptions（whisper-1 等，准确率更高）
-  mode: 'local',
+  provider: 'local',
   baseUrl: 'http://127.0.0.1:9977',
   model: 'medium',
   language: 'zh',
   fallbackWebSpeech: false,
-  apiBase: 'https://api.openai.com/v1',
+  apiBase: '',
   apiKey: '',
-  apiModel: 'whisper-1'
+  apiModel: ''
 }
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const TIMEOUT_MS = 120000
@@ -43,10 +61,10 @@ export async function loadSttSettings() {
       language: text(parsed?.language) || DEFAULT_SETTINGS.language,
       // 默认不回退浏览器识别：Electron 里 Web Speech 往往要联网，失败信息反而盖住真正的原因。
       fallbackWebSpeech: parsed?.fallbackWebSpeech === true,
-      mode: parsed?.mode === 'openai' ? 'openai' : 'local',
-      apiBase: text(parsed?.apiBase) || DEFAULT_SETTINGS.apiBase,
+      provider: PROVIDERS[parsed?.provider] !== undefined ? parsed.provider : (parsed?.mode === 'openai' ? 'custom' : 'local'),
+      apiBase: text(parsed?.apiBase) || PROVIDERS[parsed?.provider]?.apiBase || '',
       apiKey: text(parsed?.apiKey),
-      apiModel: text(parsed?.apiModel) || DEFAULT_SETTINGS.apiModel
+      apiModel: text(parsed?.apiModel) || PROVIDERS[parsed?.provider]?.apiModel || ''
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -62,10 +80,10 @@ export async function saveSttSettings(next) {
     model: text(next.model) || DEFAULT_SETTINGS.model,
     language: text(next.language) || DEFAULT_SETTINGS.language,
     fallbackWebSpeech: next.fallbackWebSpeech === true,
-    mode: next.mode === 'openai' ? 'openai' : 'local',
-    apiBase: text(next.apiBase) || DEFAULT_SETTINGS.apiBase,
+    provider: PROVIDERS[next.provider] !== undefined ? next.provider : 'local',
+    apiBase: text(next.apiBase),
     apiKey: next.apiKey === undefined ? '' : text(next.apiKey),
-    apiModel: text(next.apiModel) || DEFAULT_SETTINGS.apiModel
+    apiModel: text(next.apiModel)
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
   await writeFile(temp, payload, 'utf8')
@@ -130,24 +148,37 @@ export async function transcribe(bytes, options = {}) {
   if (Number.isFinite(durationMs) && durationMs > 0 && durationMs < 600) throw new Error('录音太短（不到 1 秒），请按住麦克风说一句')
   if (bytes.length < 1500) throw new Error('没有录到声音（音频过小），检查麦克风权限后重试')
   if (bytes.length > MAX_AUDIO_BYTES) throw new Error('音频超过 ' + String(Math.round(MAX_AUDIO_BYTES / 1024 / 1024)) + 'MB 上限')
-  const openaiMode = settings.mode === 'openai'
+  const providerId = PROVIDERS[settings.provider] !== undefined ? settings.provider : 'local'
+  const protocol = PROVIDERS[providerId].protocol
+  const language = settings.language || 'zh'
   const form = new FormData()
   form.append('file', new Blob([bytes], { type: options.contentType || 'audio/webm' }), options.filename || 'speech.webm')
-  form.append('language', settings.language || 'zh')
-  form.append('response_format', 'text')
   const headers = {}
   let endpoint = ''
-  if (openaiMode) {
-    const apiBase = text(settings.apiBase).replace(/\/+$/, '')
-    if (apiBase.length === 0) throw new Error('没有配置 OpenAI 兼容接口地址')
-    endpoint = apiBase + '/audio/transcriptions'
-    form.append('model', text(settings.apiModel) || 'whisper-1')
-    if (text(settings.apiKey).length > 0) headers.authorization = 'Bearer ' + text(settings.apiKey)
-  } else {
+
+  if (protocol === 'local') {
     const base = text(settings.baseUrl).replace(/\/+$/, '')
     endpoint = base + '/api'
-    form.append('model', settings.model || 'small')
+    form.append('language', language)
+    form.append('response_format', 'text')
+    form.append('model', settings.model || 'medium')
+  } else {
+    const apiBase = text(settings.apiBase).replace(/\/+$/, '')
+    if (apiBase.length === 0) throw new Error('没有配置接口地址')
+    if (text(settings.apiKey).length > 0) headers.authorization = 'Bearer ' + text(settings.apiKey)
+    if (protocol === 'minimax') {
+      endpoint = apiBase + '/speech_to_text'
+      form.append('model', text(settings.apiModel) || 'asr-1.0')
+      form.append('response_format', 'json')
+      headers.language = language
+    } else {
+      endpoint = apiBase + '/audio/transcriptions'
+      form.append('model', text(settings.apiModel) || 'whisper-1')
+      form.append('language', language)
+      form.append('response_format', 'text')
+    }
   }
+
   const response = await fetch(endpoint, {
     method: 'POST',
     body: form,
@@ -156,18 +187,14 @@ export async function transcribe(bytes, options = {}) {
   })
   const raw = await response.text()
   if (!response.ok) throw new Error('STT HTTP ' + String(response.status) + '：' + raw.slice(0, 200))
-  // OpenAI 兼容接口通常回纯文本；也兼容 {text:"…"} 的 JSON 形态（本地 stt 的 /v1 就是这样）。
-  if (openaiMode) {
-    let parsed = null
-    try { parsed = JSON.parse(raw) } catch { /* 纯文本 */ }
-    const value = parsed !== null && typeof parsed === 'object' && typeof parsed.text === 'string' ? parsed.text : raw
-    return cleanTranscript(value)
+
+  // 各家响应形态不同：本地 stt {code,data}；MiniMax {text,duration}；OpenAI 兼容多为纯文本或 {text}。
+  let parsed = null
+  try { parsed = JSON.parse(raw) } catch { /* 纯文本 */ }
+  if (parsed !== null && typeof parsed === 'object' && 'code' in parsed) {
+    if (Number(parsed.code) !== 0) throw new Error('STT 失败：' + text(parsed.msg || raw).slice(0, 200))
+    return cleanTranscript(parsed.data)
   }
-  let payload = null
-  try { payload = JSON.parse(raw) } catch { /* 可能是纯文本 */ }
-  if (payload !== null && typeof payload === 'object' && 'code' in payload) {
-    if (Number(payload.code) !== 0) throw new Error('STT 失败：' + text(payload.msg || raw).slice(0, 200))
-    return cleanTranscript(payload.data)
-  }
+  if (parsed !== null && typeof parsed === 'object' && typeof parsed.text === 'string') return cleanTranscript(parsed.text)
   return cleanTranscript(raw)
 }

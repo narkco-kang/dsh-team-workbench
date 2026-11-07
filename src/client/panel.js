@@ -408,6 +408,13 @@ window.__ModuleLoader__.load({
     function fetchSttSettings(probe) {
       return fetch("/api/team-workbench/stt" + (probe ? "?probe=1" : ""), { cache: "no-store" }).then(unwrap);
     }
+    var STT_PRESETS = [
+      { id: "local", label: "本地 stt（faster-whisper）", apiBase: "http://127.0.0.1:9977", apiModel: "medium", protocol: "local" },
+      { id: "openai", label: "OpenAI Whisper", apiBase: "https://api.openai.com/v1", apiModel: "whisper-1", protocol: "openai" },
+      { id: "glm", label: "智谱 GLM-ASR", apiBase: "https://open.bigmodel.cn/api/paas/v4", apiModel: "glm-asr-2512", protocol: "openai" },
+      { id: "minimax", label: "MiniMax ASR", apiBase: "https://api.minimax.chat/v1", apiModel: "asr-1.0", protocol: "minimax" },
+      { id: "custom", label: "自定义 OpenAI 兼容", apiBase: "", apiModel: "", protocol: "openai" }
+    ];
     function postSttSettings(stt) {
       return fetch("/api/team-workbench/stt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "settings", stt: stt }) }).then(unwrap);
     }
@@ -2325,11 +2332,11 @@ window.__ModuleLoader__.load({
           : null,
         sttOpen
           ? h("div", { className: "ats-im-form" },
-              h("div", { className: "ats-preset-title" }, "语音识别 · 本地 stt / OpenAI 兼容接口"),
+              h("div", { className: "ats-preset-title" }, "语音识别 · 选择转写服务"),
               h("div", { className: "ats-sub", style: { margin: "4px 0 6px" } },
-                sttSettings.mode === "openai"
-                  ? "走任意 OpenAI 兼容 /audio/transcriptions（whisper-1 等），准确率通常高于本地 tiny。"
-                  : "本地 faster-whisper（jianchang512/stt，默认 http://127.0.0.1:9977）；准确率靠模型：small 起步，medium 更准。"),
+                (sttSettings.provider || "local") === "local"
+                  ? "本地 faster-whisper（jianchang512/stt，默认 http://127.0.0.1:9977）；准确率靠模型：medium 推荐。"
+                  : "走该服务商自带的转写接口（OpenAI / 智谱 GLM-ASR / MiniMax / 自定义），需要填对应 API Key。"),
               h("div", { className: "ats-sub", style: { margin: "2px 0 6px" } },
                 "麦克风权限：" + (micPerm === "granted" ? "已授权" : micPerm === "denied" ? "已被拒绝（系统设置 → 隐私与安全性 → 麦克风 → 勾选 DSH Desktop）" : micPerm === "prompt" ? "未授权（点 🎤 时系统会弹窗）" : "未知"),
                 h("button", {
@@ -2339,34 +2346,46 @@ window.__ModuleLoader__.load({
               ),
               h("div", { className: "ats-bar" },
                 h("select", {
-                  className: "ats-select", style: { flex: "0 0 150px" }, value: sttSettings.mode || "local",
-                  onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { mode: e.target.value })); }
-                }, [["local", "本地 stt"], ["openai", "OpenAI 兼容接口"]].map(function (pair) { return h("option", { key: pair[0], value: pair[0] }, pair[1]); })),
-                sttSettings.mode === "openai"
+                  className: "ats-select", style: { flex: "0 0 170px" }, value: sttSettings.provider || "local",
+                  onChange: function (e) {
+                    var preset = STT_PRESETS.filter(function (item) { return item.id === e.target.value; })[0] || STT_PRESETS[0];
+                    setSttSettings(Object.assign({}, sttSettings, { provider: preset.id, apiBase: preset.apiBase, apiModel: preset.apiModel }));
+                  }
+                }, STT_PRESETS.map(function (preset) { return h("option", { key: preset.id, value: preset.id }, preset.label); })),
+                (sttSettings.provider || "local") === "local"
                   ? h("input", {
-                      className: "ats-input", style: { flex: "1 1 200px" }, value: sttSettings.apiBase,
-                      placeholder: "https://api.openai.com/v1",
-                      onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { apiBase: e.target.value })); }
-                    })
-                  : h("input", {
                       className: "ats-input", style: { flex: "1 1 200px" }, value: sttSettings.baseUrl,
                       placeholder: "http://127.0.0.1:9977",
                       onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { baseUrl: e.target.value })); }
-                    }),
-                sttSettings.mode === "openai"
-                  ? h("input", {
-                      className: "ats-input", style: { flex: "0 1 140px" }, value: sttSettings.apiModel,
-                      placeholder: "whisper-1",
-                      onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { apiModel: e.target.value })); }
                     })
-                  : null,
-                sttSettings.mode === "openai"
-                  ? h("input", {
-                      className: "ats-input", style: { flex: "0 1 160px" }, type: "password",
+                  : h("input", {
+                      className: "ats-input", style: { flex: "1 1 220px" }, value: sttSettings.apiBase,
+                      placeholder: "https://…/v1",
+                      onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { apiBase: e.target.value })); }
+                    }),
+                (sttSettings.provider || "local") === "local"
+                  ? h("select", {
+                      className: "ats-select", style: { flex: "0 0 130px" }, value: sttSettings.model,
+                      onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { model: e.target.value })); }
+                    }, [
+                      ["tiny", "tiny（最快）"],
+                      ["base", "base"],
+                      ["small", "small"],
+                      ["medium", "medium（推荐）"],
+                      ["large-v3", "large-v3（最准）"]
+                    ].map(function (pair) { return h("option", { key: pair[0], value: pair[0] }, pair[1]); }))
+                  : h("input", {
+                      className: "ats-input", style: { flex: "0 1 150px" }, value: sttSettings.apiModel,
+                      placeholder: "model",
+                      onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { apiModel: e.target.value })); }
+                    }),
+                (sttSettings.provider || "local") === "local"
+                  ? null
+                  : h("input", {
+                      className: "ats-input", style: { flex: "0 1 170px" }, type: "password",
                       value: sttSettings.apiKey, placeholder: sttSettings.apiKeyConfigured ? "已配置（留空沿用）" : "API Key",
                       onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { apiKey: e.target.value })); }
-                    })
-                  : null,
+                    }),
                 h("select", {
                   className: "ats-select", style: { flex: "0 0 120px" }, value: sttSettings.model,
                   onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { model: e.target.value })); }
