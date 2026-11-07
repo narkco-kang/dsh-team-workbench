@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 3.1.0 — 2026-11-08
+
+真正根因：子智能体派发时读的是遗留字段 provider/model（qwen3.6/3.8、v4-pro），
+团队面板里配的 routes 从未生效。
+- subAgentAsMember / subAgentMember 改为优先使用 routes；
+- 旧字段同步为 deepseek-flash；单次模型调用上限 50s → 20s。
+
 ## 3.0.0 — 2026-11-08
 
 确证宿主把子智能体激活串行化（6 次并发实测耗时为 1.9/3.3/5.6/7.2/9.0/10.9 秒等距递增）：

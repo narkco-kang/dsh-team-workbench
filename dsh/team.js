@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.0.0'
+const PLUGIN_VERSION = '3.1.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -590,7 +590,7 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
     // 同样的保护：某些 provider 卡住时 run.result 永不 resolve。
     settled = await Promise.race([
       run.result,
-      new Promise((resolve) => setTimeout(() => resolve({ stopReason: 'timeout', diagnostic: '模型调用超过 50 秒未返回' }), 50000))
+      new Promise((resolve) => setTimeout(() => resolve({ stopReason: 'timeout', diagnostic: '模型调用超过 20 秒未返回' }), 20000))
     ])
   } finally {
     try { await run.dispose() } catch { /* 清理失败不影响已收集的结果 */ }
@@ -694,7 +694,7 @@ function fallbackRoutesFor(primaryProvider) {
   const pool = primary === 'deepseek-official'
     ? [
         { provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' },
-        { provider: 'glm', model: 'glm-5.3' },
+        { provider: 'glm', model: 'glm-5.3-flash' },
         { provider: 'deepseek-official', model: 'deepseek-flash' }
       ]
     : [
@@ -721,12 +721,17 @@ function subAgentMember(departmentName, sub) {
     activeRouteId: 'sub-route',
     routes: (function () {
       const list = []
-      if (sub.provider.length > 0 && sub.model.length > 0) {
+      // 优先用子智能体保存的多路由配置（团队面板里配的），老数据才退回单字段。
+      const configured = Array.isArray(sub.routes) ? sub.routes.filter((route) => route.enabled !== false) : []
+      for (const entry of configured) {
+        list.push({ ...entry, id: entry.id || ('sub-route-' + entry.provider + '-' + entry.model) })
+      }
+      if (list.length === 0 && sub.provider.length > 0 && sub.model.length > 0) {
         list.push({ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true })
       }
-      // 子智能体也要有兜底：主路由失败时依次尝试 deepseek 两条已验证线路，
+      // 子智能体也要有兜底：主路由失败时依次尝试已验证线路，
       // 避免「某个 provider 上游抖动 → 整个部门这一棒失败」。
-      for (const fallback of fallbackRoutesFor(sub.provider)) {
+      for (const fallback of fallbackRoutesFor(list.length > 0 ? list[0].provider : sub.provider)) {
         if (list.some((route) => route.provider === fallback.provider && route.model === fallback.model)) continue
         list.push({ id: 'sub-fb-' + fallback.provider + '-' + fallback.model, label: '回退 · ' + fallback.model, provider: fallback.provider, model: fallback.model, reasoningEffort: '', enabled: true })
       }
@@ -1095,9 +1100,13 @@ const MEMBER_SCHEMA = {
 
 /** 把部门子智能体包装成一次可派发的虚拟成员（让它能被 agent_team_dispatch 直接点名）。 */
 export function subAgentAsMember(owner, sub, index) {
-  const route = sub.provider.length > 0 && sub.model.length > 0
-    ? [{ id: 'sub-route-' + String(index), label: '子智能体路由', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
-    : []
+  // 优先用子智能体自己的 routes（多路由 + 回退）；只有老数据才退回单个 provider/model。
+  const listed = Array.isArray(sub.routes) ? sub.routes.filter((route) => route.enabled !== false) : []
+  const route = listed.length > 0
+    ? listed.map((entry, order) => ({ ...entry, id: entry.id || ('sub-route-' + String(index) + '-' + String(order)) }))
+    : (sub.provider.length > 0 && sub.model.length > 0
+      ? [{ id: 'sub-route-' + String(index), label: '子智能体路由', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
+      : [])
   return {
     id: sub.id,
     name: sub.name,
