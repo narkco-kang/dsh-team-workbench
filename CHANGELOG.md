@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.72.1 — 2026-11-08
+
+- 🎲 自动分配改为「按 provider 轮转」：优先保证模型多样性，同一家先只取一个模型，不够再补第二个；
+- 服务端 models-auto 与客户端探测顺序都按该策略执行。
+
 ## 2.72.0 — 2026-11-08
 
 - 新增工具 agent_team_group_create：按名字建群（默认拉全部启用成员，也可指定 memberIds），建完可直接 agent_team_group_chat；

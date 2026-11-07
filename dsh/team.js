@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.72.0'
+const PLUGIN_VERSION = '2.72.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1765,8 +1765,25 @@ async function applyMemberAction(store, body, ctx) {
       } catch { /* 单个 provider 失败不影响其它 */ }
     }
     if (candidates.length === 0) return '目录里没有可用模型'
-    const usable = []
+    // 按 provider 分组后轮转取用：优先保证「模型多样性」（同一家只先取一个），
+    // 第一轮凑不满再用第二、第三个模型补齐。
+    const byProvider = new Map()
     for (const candidate of candidates) {
+      if (!byProvider.has(candidate.provider)) byProvider.set(candidate.provider, [])
+      byProvider.get(candidate.provider).push(candidate)
+    }
+    const ordered = []
+    let round = 0
+    while (ordered.length < candidates.length && round < 40) {
+      let added = false
+      for (const list of byProvider.values()) {
+        if (list[round] !== undefined) { ordered.push(list[round]); added = true }
+      }
+      if (!added) break
+      round += 1
+    }
+    const usable = []
+    for (const candidate of ordered) {
       try {
         const info = await llm.resolveModelInfo(candidate.provider, candidate.model)
         const modalities = Array.isArray(info.inputModalities) ? info.inputModalities.map(text) : []
