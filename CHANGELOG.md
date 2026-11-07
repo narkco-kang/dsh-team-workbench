@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.81.0 — 2026-11-08
+
+- 常驻 Agent 复用（实验）：每个成员首次派发时用 ctx.agents.create 建一个常驻 Agent，
+  之后用 agent.followup + whenIdle 追加，省掉每次 ~3s 的会话装配；
+- 任何异常（拿不到 create、超时、空输出）自动退回原 startActivation 路径；
+- 插件释放时一并 dispose 常驻 Agent，避免热重载留下孤儿会话。
+
 ## 2.80.4 — 2026-11-08
 
 - 失败可归因：attempts 增加 attemptIndex/attemptTotal/routeSource/errorClass/ms，

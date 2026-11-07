@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.80.4'
+const PLUGIN_VERSION = '2.81.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -600,6 +600,62 @@ async function withRoleInstructions(member) {
   }
 }
 
+// 持久 Agent 复用：成员第一次派发时创建一个常驻 Agent，之后用 followup 追加，
+// 省掉每次 startActivation 的会话装配（实测约 3.3s）。任何异常都退回一次性激活。
+const REUSE_AGENTS = new Map()
+
+function lastAssistantText(agent, since) {
+  try {
+    const messages = agent.session.deriveMessages()
+    const fresh = messages.slice(typeof since === 'number' ? since : 0)
+    const parts = []
+    for (const message of fresh) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.content ?? []) {
+        if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
+      }
+    }
+    return parts.join('\n').trim()
+  } catch {
+    return ''
+  }
+}
+
+async function runPersistentAgent(ctx, member, route, prompt, timeoutMs) {
+  const agents = ctx.get('agents')
+  if (agents === undefined || agents === null || typeof agents.create !== 'function') return undefined
+  const provider = route !== null ? route.provider : ''
+  const model = route !== null ? route.model : ''
+  const key = member.id
+  let entry = REUSE_AGENTS.get(key)
+  if (entry !== undefined && (entry.provider !== provider || entry.model !== model)) {
+    try { await entry.handle.dispose() } catch { /* 已释放 */ }
+    REUSE_AGENTS.delete(key)
+    entry = undefined
+  }
+  if (entry === undefined) {
+    const agentOptions = provider.length > 0 && model.length > 0 ? { provider, model } : undefined
+    const handle = await agents.create({
+      sessionId: 'team-' + key + '-' + Date.now().toString(36),
+      ...(agentOptions !== undefined ? { agentOptions } : {}),
+      meta: { cwd: process.cwd() }
+    })
+    entry = { handle, provider, model }
+    REUSE_AGENTS.set(key, entry)
+  }
+  const agent = entry.handle?.agent
+  if (agent === undefined || agent === null) return undefined
+  let since = 0
+  try { since = agent.session.deriveMessages().length } catch { since = 0 }
+  agent.followup({ content: [{ type: 'text', text: prompt }], source: { kind: 'team-workbench' } })
+  await Promise.race([
+    agent.whenIdle(),
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error('persistent agent idle timeout')), Number(timeoutMs) || 90000))
+  ])
+  const output = lastAssistantText(agent, since)
+  return { output, stopReason: output.length > 0 ? 'completed' : 'error', provider, model, childSessionId: '', detail: '' }
+}
+
 /** 把失败原因归到可统计的类别，便于按 provider/模型分桶。 */
 export function classifyError(value) {
   const text = String(value || '').toLowerCase()
@@ -821,9 +877,20 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
     const bounds = signal !== undefined && signal !== null ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)
     let result
     try {
-      result = await runOnRoute(ctx, parent, member, route, task, bounds)
-    } catch (error) {
-      result = { childSessionId: '', stopReason: 'error', output: '', detail: String(error) }
+      // 优先复用常驻 Agent（省掉 ~3s 会话装配）；拿不到句柄或失败就退回一次性激活。
+      const personaPrompt = '【角色】你是团队中的「' + member.name + '」，职责：' + member.role + '。' +
+        (member.instructions.trim().length > 0 ? '\n【角色说明】' + member.instructions.trim() : '') +
+        '\n\n【任务】\n' + task
+      const reused = await runPersistentAgent(ctx, member, route, personaPrompt, 60000)
+      result = reused !== undefined && reused.output.length > 0
+        ? reused
+        : await runOnRoute(ctx, parent, member, route, task, bounds)
+    } catch {
+      try {
+        result = await runOnRoute(ctx, parent, member, route, task, bounds)
+      } catch (error) {
+        result = { childSessionId: '', stopReason: 'error', output: '', detail: String(error) }
+      }
     }
     const ok = result.stopReason === 'completed' && result.output.length > 0
     attempts.push({
@@ -2099,6 +2166,11 @@ export function apply(ctx, config) {
   const disposers = []
   const handle = {
     release() {
+      // 常驻 Agent 也要一起释放，否则热重载后会留下孤儿会话。
+      for (const entry of REUSE_AGENTS.values()) {
+        try { entry.handle?.dispose?.() } catch { /* 已释放 */ }
+      }
+      REUSE_AGENTS.clear()
       while (disposers.length > 0) {
         const dispose = disposers.pop()
         try {
