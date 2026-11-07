@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// 测试必须固定默认 profile：宿主可能把 DSH_PROFILE 设成 desktop-safe-mode，
+// 泄漏进来会让 fixture 里只有 profiles/web 的场景全部误报「找不到 profile」。
+delete process.env.DSH_PROFILE
 /**
  * smoke-migrate.mjs — migrate-profile.mjs 的端到端回归
  *

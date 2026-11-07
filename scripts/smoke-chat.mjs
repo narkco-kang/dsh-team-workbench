@@ -116,6 +116,9 @@ await call('/api/team-workbench/chats/rooms', { action: 'update', id: roomId, ro
 const shallow = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '再确认一下范围' })
 check('lead 房 relayDepth=0 不再转发 @', shallow.turns.length === 1 && shallow.turns[0].name === architect.name, String(shallow.turns && shallow.turns.length))
 
+const usage = await call('/api/team-workbench/usage')
+check('用量统计接口可用', usage.ok === true && Array.isArray(usage.models) && Array.isArray(usage.members), String((usage.models || []).length) + ' 个模型')
+
 const search = await call('/api/team-workbench/chats/search?q=' + encodeURIComponent('两天') + '&kind=group')
 check('聊天记录检索命中群消息', search.ok === true && search.total > 0 && search.hits.every((h) => h.kind === 'group'), search.total + ' 条')
 const searchPrivate = await call('/api/team-workbench/chats/search?q=' + encodeURIComponent('你好') + '&kind=private')

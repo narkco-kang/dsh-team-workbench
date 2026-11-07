@@ -56,7 +56,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.3.0'
+const PLUGIN_VERSION = '2.4.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -69,6 +69,7 @@ const ROLES_ROUTE = ROUTE_BASE + '/roles'
 const ROLE_BODY_ROUTE = ROUTE_BASE + '/roles/body'
 const PRESET_ROUTE = ROUTE_BASE + '/preset'
 const AVATAR_ROUTE = ROUTE_BASE + '/avatar'
+const USAGE_ROUTE = ROUTE_BASE + '/usage'
 
 /** 推理强度选项（与 dsh-llm 的 ReasoningEffortId 对齐）。 */
 const EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'max']
@@ -91,6 +92,38 @@ export function harnessHome() {
 function storePath() {
   return join(harnessHome(), 'agent-team-studio', 'team.json')
 }
+
+/** 派发用量日志（本机统计，不是服务商余额）。 */
+function usagePath() {
+  return join(harnessHome(), 'agent-team-studio', 'usage.json')
+}
+
+/** 追加一条派发记录；最多保留 800 条，写失败不影响派发。 */
+export async function recordUsage(entry) {
+  try {
+    let list = []
+    try {
+      const raw = await readFile(usagePath(), 'utf8')
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) list = parsed
+    } catch { /* 首次写入 */ }
+    list.push(entry)
+    if (list.length > 800) list = list.slice(list.length - 800)
+    await mkdir(dirname(usagePath()), { recursive: true })
+    await writeFile(usagePath(), JSON.stringify(list))
+  } catch { /* 统计失败不阻断 */ }
+}
+
+/** 读取全部派发记录。 */
+export async function readUsage() {
+  try {
+    const parsed = JSON.parse(await readFile(usagePath(), 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 
 /** 生成短小、稳定、可读的 id。 */
 export function makeId(prefix) {
@@ -489,9 +522,11 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
   const attempts = []
 
   if (candidates.length === 0) {
+    const started = Date.now()
     try {
       const result = await runOnRoute(ctx, parent, member, null, task, signal)
       attempts.push({ route: '（继承主智能体）', ok: result.stopReason === 'completed', stopReason: result.stopReason })
+      await recordUsage({ at: new Date().toISOString(), memberId: member.id, provider: '', model: '', ok: result.stopReason === 'completed', ms: Date.now() - started })
       return { ...result, provider: '', model: '', attempts }
     } catch (error) {
       attempts.push({ route: '（继承主智能体）', ok: false, stopReason: 'error' })
@@ -501,6 +536,7 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
 
   let last = null
   for (const route of candidates) {
+    const started = Date.now()
     let result
     try {
       result = await runOnRoute(ctx, parent, member, route, task, signal)
@@ -519,6 +555,7 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
       detail: ok ? '' : String(result.detail ?? '').slice(0, 400)
     })
     last = { ...result, provider: route.provider, model: route.model }
+    await recordUsage({ at: new Date().toISOString(), memberId: member.id, routeId: route.id, provider: route.provider, model: route.model, ok, ms: Date.now() - started })
     // 成功、或已拿到正文（例如被截断）都不再回退
     if (ok || result.stopReason === 'completed') return { ...last, attempts }
   }
@@ -1606,6 +1643,41 @@ export function apply(ctx, config) {
         member.avatar = { kind: 'image', imageId: id }
         await saveStore(store)
         return json(await snapshot())
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: USAGE_ROUTE,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async () => {
+      try {
+        const list = await readUsage()
+        const today = new Date().toISOString().slice(0, 10)
+        const models = new Map()
+        const members = new Map()
+        for (const entry of list) {
+          const modelKey = String(entry.provider || '') + '::' + String(entry.model || '')
+          const model = models.get(modelKey) || { provider: String(entry.provider || ''), model: String(entry.model || ''), total: 0, today: 0, ok: 0, ms: 0, lastAt: '' }
+          model.total += 1
+          model.ms += Number(entry.ms) || 0
+          if (entry.ok === true) model.ok += 1
+          const at = String(entry.at || '')
+          if (at.slice(0, 10) === today) model.today += 1
+          if (at > model.lastAt) model.lastAt = at
+          models.set(modelKey, model)
+
+          const memberKey = String(entry.memberId || '')
+          const member = members.get(memberKey) || { memberId: memberKey, total: 0, today: 0, lastAt: '' }
+          member.total += 1
+          if (at.slice(0, 10) === today) member.today += 1
+          if (at > member.lastAt) member.lastAt = at
+          members.set(memberKey, member)
+        }
+        return json({ ok: true, models: [...models.values()], members: [...members.values()] })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }
