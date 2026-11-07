@@ -2087,13 +2087,23 @@ window.__ModuleLoader__.load({
       } catch (error) { /* 隐私模式忽略 */ }
     }
 
+    // 会话概览的内存缓存：切标签会卸载/重挂 ChatPanel，有缓存就先渲染再后台刷新，避免侧栏闪空白。
+    var CHAT_OVERVIEW_CACHE = { data: null, at: 0 };
+    function cachedOverview() {
+      if (CHAT_OVERVIEW_CACHE.data === null) return null;
+      return CHAT_OVERVIEW_CACHE.data;
+    }
+
     function ChatPanel(props) {
       var scope = props.scope || {};
       var sessionId = resolveSessionId(scope);
       var initial = typeof props.initialMember === "string" ? props.initialMember : "";
       var initialRoom = typeof props.initialRoom === "string" ? props.initialRoom : "";
 
-      var dataState = useState({ loading: true, error: "", private: [], rooms: [] });
+      var warm = cachedOverview();
+      var dataState = useState(warm === null
+        ? { loading: true, error: "", private: [], rooms: [] }
+        : { loading: false, error: "", private: warm.private, rooms: warm.rooms });
       var data = dataState[0];
       var setData = dataState[1];
       var chiefState = useState("");
@@ -2469,7 +2479,10 @@ window.__ModuleLoader__.load({
 
       var loadOverview = useCallback(function () {
         fetchChats().then(function (payload) {
-          setData({ loading: false, error: "", private: payload.private || [], rooms: payload.rooms || [] });
+          var next = { private: payload.private || [], rooms: payload.rooms || [] };
+          CHAT_OVERVIEW_CACHE.data = next;
+          CHAT_OVERVIEW_CACHE.at = Date.now();
+          setData({ loading: false, error: "", private: next.private, rooms: next.rooms });
         }).catch(function (error) {
           setData(function (prev) { return Object.assign({}, prev, { loading: false, error: String(error && error.message ? error.message : error) }); });
         });
@@ -3988,6 +4001,18 @@ window.__ModuleLoader__.load({
         window.addEventListener("keydown", onKey);
         return function () { window.removeEventListener("keydown", onKey); };
       }, [tour.on, tour.step]);
+
+      // 预取会话概览：用户还在团队页时就先拿好侧栏数据，切回聊天是“秒开”。
+      useEffect(function () {
+        if (CHAT_OVERVIEW_CACHE.data !== null) return undefined;
+        var alive = true;
+        fetchChats().then(function (payload) {
+          if (!alive) return;
+          CHAT_OVERVIEW_CACHE.data = { private: payload.private || [], rooms: payload.rooms || [] };
+          CHAT_OVERVIEW_CACHE.at = Date.now();
+        }).catch(function () { /* 预取失败不影响正常加载 */ });
+        return function () { alive = false; };
+      }, []);
 
       // 全局快捷键：⌘1..6 切标签，/ 聚焦搜索（不在输入框里时）。
       useEffect(function () {

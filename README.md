@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.60.1**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.61.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -32,6 +32,10 @@
 - 角色库可按「整部门 = 1 个智能体」加入：部门内的角色变成它的**子智能体**（各带模型路由）；
 - 派发链路：**主管（自己的模型）读任务 → 挑 1–4 个子智能体按职能分工 → 并行执行 → 主管汇总成一段答复**；
 - 历史数据也能一键整理：🧩 合并所有 ≥2 人的部门（子智能体保留、私聊历史合并、群引用去重）。
+
+**性能**
+- 会话侧栏用**内存缓存 + 预取**：切标签会卸载/重挂聊天页，现在先用缓存渲染再后台刷新，切回来约 26ms 出列表，不再闪空白；
+- 打开工作台时就会预取一次概览，第一次进聊天也不用等。
 
 **对话**
 - 私聊带最近 12 条上下文；群聊支持**管理员先答 / 自动挑人 / 只回应 @**；
@@ -113,17 +117,17 @@
 
 ## 安装
 
-2.60.1 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.61.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.60.1.tgz
+  plugin --profile web add ./dsh-team-workbench-2.61.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.60.1/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.61.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -133,7 +137,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.60.1**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.61.0**，否则两套入口会同时存在。
 
 ## 包结构
 

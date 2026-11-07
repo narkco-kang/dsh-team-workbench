@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.61.0 — 2026-11-08
+
+- 修「切回聊天页侧栏刷得慢」：会话概览加内存缓存 `CHAT_OVERVIEW_CACHE`，重挂 ChatPanel 时直接用缓存渲染，
+  后台再 fetch 刷新；失败时保留旧数据；
+- WorkbenchPanel 挂载时预取一次概览，首次进聊天也不必等；
+- 预览实测：team → chat 切换后 2 帧（约 26ms）侧栏 4 条已在，无空白。
+
 ## 2.60.1 — 2026-11-07
 
 - 修部门派发返回值：`runDepartmentMember` 现在同时返回 `text` 与 `output`，
