@@ -60,15 +60,20 @@ const chatsPayload = {
     { id: 'room-demo', name: '项目例会', adminId: members[0].id, adminName: members[0].name, memberIds: [members[0].id, members[2].id, members[3].id], count: 3, lastText: '工程侧两天可以完成', updatedAt: now }
   ]
 }
+const dayAgo = (days, hour) => {
+  const d = new Date(Date.now() - days * 86400000)
+  d.setHours(hour === undefined ? 10 : hour, 0, 0, 0)
+  return d.toISOString()
+}
 const messagesPayload = {
   private: [
-    { id: 'm1', role: 'user', memberId: '', name: '用户', emoji: '🧑', text: '这个需求下周能上线吗？' },
-    { id: 'm2', role: 'agent', memberId: members[0].id, name: members[0].name, emoji: members[0].emoji, text: '按现在的范围，周三可以出第一版；风险是接口联调，需要后端先冻结字段。' }
+    { id: 'm1', role: 'user', memberId: '', name: '用户', emoji: '🧑', text: '这个需求下周能上线吗？', time: dayAgo(0, 9) },
+    { id: 'm2', role: 'agent', memberId: members[0].id, name: members[0].name, emoji: members[0].emoji, text: '按现在的范围，周三可以出第一版；风险是接口联调，需要后端先冻结字段。', time: dayAgo(0, 9) }
   ],
   group: [
-    { id: 'g1', role: 'user', memberId: '', name: '用户', emoji: '🧑', text: '这个需求两天能做吗？' },
-    { id: 'g2', role: 'agent', memberId: members[0].id, name: members[0].name, emoji: members[0].emoji, text: '我来安排：@' + members[2].name + ' 你评估一下工程侧。' },
-    { id: 'g3', role: 'agent', memberId: members[2].id, name: members[2].name, emoji: members[2].emoji, text: '工程结论：两天可以，先做只读版本，写操作放第二期。' }
+    { id: 'g1', role: 'user', memberId: '', name: '用户', emoji: '🧑', text: '这个需求两天能做吗？', time: dayAgo(0, 11) },
+    { id: 'g2', role: 'agent', memberId: members[0].id, name: members[0].name, emoji: members[0].emoji, text: '我来安排：@' + members[2].name + ' 你评估一下工程侧。', time: dayAgo(1, 15) },
+    { id: 'g3', role: 'agent', memberId: members[2].id, name: members[2].name, emoji: members[2].emoji, text: '工程结论：两天可以，先做只读版本，写操作放第二期。', time: dayAgo(5, 18) }
   ]
 }
 
