@@ -677,9 +677,14 @@ window.__ModuleLoader__.load({
         ),
         h("g", { className: "ats-mascot-bob" },
           h("g", { filter: "url(#shadow-" + gradientId + ")" }, shape.node(gradientId)),
-          h("ellipse", { cx: 23, cy: 17, rx: 9.5, ry: 4.4, fill: "#ffffff", opacity: 0.55, filter: "url(#gloss-" + gradientId + ")" }),
-          h("ellipse", { cx: 32, cy: 50, rx: 13, ry: 5, fill: "#0b1220", opacity: 0.18, filter: "url(#gloss-" + gradientId + ")" }),
-          h("ellipse", { cx: 22, cy: 19, rx: 8, ry: 4, fill: "#fff", opacity: 0.16 }),
+          // 借鉴 Grok Bot 的「黑色玻璃球」：右上角一弯月牙高光 + 一颗亮点，底部压暗做球感。
+          h("path", {
+            d: "M21 12.5c7-3 16-1.5 20.5 4.5-5.5-1.5-10-1-13.5 1.5-3-1-5.5-3-7-6z",
+            fill: "#ffffff", opacity: 0.5, filter: "url(#gloss-" + gradientId + ")"
+          }),
+          h("ellipse", { cx: 44, cy: 16, rx: 2.6, ry: 1.7, fill: "#ffffff", opacity: 0.6, transform: "rotate(28 44 16)" }),
+          h("ellipse", { cx: 32, cy: 52, rx: 14, ry: 5.5, fill: "#0b1220", opacity: 0.22, filter: "url(#gloss-" + gradientId + ")" }),
+          h("ellipse", { cx: 24, cy: 20, rx: 7, ry: 3.2, fill: "#ffffff", opacity: 0.14 }),
           state === "working"
             ? h("circle", { className: "ats-mascot-ring", cx: 32, cy: 33, r: 27, fill: "none", stroke: "#fbbf24", strokeWidth: 2.4, strokeDasharray: "7 9", strokeLinecap: "round" })
             : null,

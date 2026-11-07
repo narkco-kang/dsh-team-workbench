@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2.30.0 — 2026-11-07
+
+- 逆向参考本机 **Grok Bot**（com.anysphere.sand，Electron）的智能体图标：
+  解包 app.asar，取出 menubar-tray 里的 bot-blob / bot-crystal / bot-dome / bot-egg 等
+  32px bot-*-face 图标，样式是「黑色玻璃球 + 月牙高光 + 极简白脸」；
+- 借鉴过来：把顶部柔光换成右上角**月牙高光 + 一颗亮点**，底部加暗部压边（球体感更强），
+  保留我们自己的彩色渐变与表情；
+- 效果见 .preview/avatar-grok.png（160px 放大）。
+
 ## 2.29.0 — 2026-11-07
 
 - 智能体图标立体化：
