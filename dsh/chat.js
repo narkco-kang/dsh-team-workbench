@@ -228,7 +228,8 @@ function messageOf(role, member, body, extra) {
     name: member !== null && member !== undefined ? member.name : '用户',
     emoji: member !== null && member !== undefined ? member.emoji : '🧑',
     color: member !== null && member !== undefined ? member.color : '',
-    text: body,
+    // 只允许字符串：曾经有对象直接进来，渲染成 [object Object] 发给模型。
+    text: typeof body === 'string' ? body : '',
     time: new Date().toISOString(),
     ...(extra !== undefined ? extra : {})
   }
@@ -935,6 +936,7 @@ export function apply(ctx) {
     const body = await readJson(request)
     if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
     const store = await loadStore()
+    if (typeof body.text !== 'string') return json({ ok: false, error: '消息内容必须是字符串' }, 400)
     const userText = text(body.text)
     if (userText.length === 0) return json({ ok: false, error: '消息不能为空' }, 400)
     if (userText.length > 4000) return json({ ok: false, error: '消息最长 4000 字' }, 400)
