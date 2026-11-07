@@ -424,7 +424,11 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
 
   let start = []
   let pickedId = ''
-  if (asked.length > 0) {
+  const wantsAll = /@(所有人|全体|all|everyone)\b/i.test(userText)
+  if (asked.length === 0 && wantsAll) {
+    // @所有人：一次叫起（最多 MAX_MENTIONS 位），其他人进下一轮接力。
+    start = alive.slice(0, MAX_MENTIONS)
+  } else if (asked.length > 0) {
     start = asked.slice(0, MAX_MENTIONS)
   } else if (responder === 'mention') {
     start = []
