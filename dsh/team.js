@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.85.0'
+const PLUGIN_VERSION = '2.86.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -557,7 +557,12 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // 不传 childId：宿主对「本地子级」的默认投递是 parent，
   // 结果会出现在父会话（用户主聊天），而团队面板的 HTTP 调用一直等到超时。
   // 走外部子级（无 childId）才会把结果返回给调用方。
-  const run = await startChild(subagents, providerName, { ...request, signal })
+  // 宿主偶尔不返回 activation（spawn 卡住）：给它 15 秒，超时就走失败回退，
+  // 不能让团队面板无限等。
+  const run = await Promise.race([
+    startChild(subagents, providerName, { ...request, signal }),
+    new Promise((_resolve, reject) => setTimeout(() => reject(new Error('subagent activation timeout')), 15000))
+  ])
   // 拿到子 agent 句柄后登记，供 steerActive 中途插话。
   try {
     const agents = ctx.get('agents')
@@ -569,7 +574,11 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   } catch { /* 拿不到句柄就退回排队 */ }
   let settled
   try {
-    settled = await run.result
+    // 同样的保护：某些 provider 卡住时 run.result 永不 resolve。
+    settled = await Promise.race([
+      run.result,
+      new Promise((resolve) => setTimeout(() => resolve({ stopReason: 'timeout', diagnostic: '模型调用超过 50 秒未返回' }), 50000))
+    ])
   } finally {
     try { await run.dispose() } catch { /* 清理失败不影响已收集的结果 */ }
   }
