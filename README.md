@@ -1,17 +1,22 @@
 # dsh-team-workbench · 智能体团队工作台
 
-一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成**全窗口聊天应用**，
-铺满 DSH 窗口（连左侧导航区域一起覆盖），右上角「收起」可缩成右下角胶囊。当前版本 **2.0.0**，
-在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
+**2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
+右上角「收起」再缩回胶囊。当前版本 **2.6.1**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
-> 改为挂载到 `document.body` 的固定层，因此能盖住宿主导航——与 DS-Bot 的做法一致。
+> 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
 > 安装走**插件**渠道，不再出现在左侧「工作台」入口。
+>
+> **2.6.1**：聊天页打开即落在上次的会话（其次第一个群、第一个成员），输入框常驻，
+> 不会再出现「页面里没有输入框」；照片头像读不出来时自动退回动态表情。
 
 ## 现在能做什么
 
-- **全窗口团队 App**：启动后铺满窗口，顶部五个标签 **聊天 / 团队 / 记录 / 角色库 / 技能库**；
-  右上角「收起」缩成右下角胶囊，点击恢复，不挡日常对话。
+- **团队 App**：默认收在右下角胶囊；点开铺满窗口，顶部六个标签
+  **聊天 / 团队 / 记录 / 额度 / 角色库 / 技能库**，右上角「收起」返回胶囊。
+- **聊天页**：左栏群聊 + 私聊列表，右栏会话头、气泡与**常驻输入框**；打开即恢复上次会话，
+  没有会话时也会显示输入框（禁用态），不会出现空页。
 - **成员与模型路由**：每个成员有姓名、职责、分组、头像、表情、配色和一组可回退的模型路由；
   「试跑」按当前路由执行并显示回退轨迹。
 - **私聊 / 群聊**：私聊带最近 12 条上下文；群聊可让管理员先答、按内容自动挑人、或只回应 @，
@@ -41,17 +46,17 @@
 
 ## 安装
 
-2.0.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.6.1 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.0.0.tgz
+  plugin --profile web add ./dsh-team-workbench-2.6.1.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.0.0/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.6.1/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -59,9 +64,9 @@ dsh plugin --profile web remove dsh-team-workbench
 
 也可以打开 **设置 → 插件 → 安装**，填 npm 包名、GitHub 地址或 `.tgz` 直链。
 
-装完**重启 Harness**（菜单 Harness → 重启 Harness），整个窗口就是团队 App；
-点右上角「收起」回到正常 DSH。1.x 是工作台包，同一个包名，**先卸掉旧工作台再装 2.0.0**，
-否则两套入口会同时存在。
+装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
+点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
+**先卸掉旧工作台再装 2.6.1**，否则两套入口会同时存在。
 
 ## 包结构
 
@@ -119,7 +124,7 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 | 层次 | 覆盖情况 |
 | --- | --- |
-| 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 18 项） |
+| 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 19 项） |
 | 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 21 路由、释放后登记表清空） |
 | 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
 | 会话功能 | `smoke-chat.mjs`（20 项：私聊连续追问、群聊 @、Auto 挑人、接力层数、工具调用、聊天记录检索） |
@@ -130,7 +135,7 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 ## 已知未验证项（按《工作台开发规范》第 8 节）
 
-- [ ] 装好后重启 Harness，整个窗口被团队 App 覆盖，左侧导航被盖住
+- [ ] 重启后右下角出现胶囊；点开铺满窗口、左侧导航被盖住，点「收起」缩回胶囊
 - [ ] 右上角「收起」缩成右下角胶囊，点击恢复，切回正常 DSH 无残留浮层
 - [ ] 五个标签各完成一次真实业务操作（聊天发消息 / 团队改成员 / 记录检索 / 角色库加入角色 / 技能库展开技能）
 - [ ] 群聊里管理员 @ 成员后，成员回复真实落到群里（本轮只做了假 subagents 的编排测试）
@@ -141,7 +146,7 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 ## 已知限制
 
 - 插件身份是 GitHub 仓库 narkco-kang/dsh-team-workbench；改 owner/repo 会让市场条目与旧会话绑定失效。
-- 2.0.0 默认铺满窗口：不想被挡时点「收起」；目前不记忆收起状态，每次启动都是展开。
+- 默认收在胶囊（2.6.0 起），开合状态记在 localStorage；清除站点数据后回到默认收起。
 - `install_local_workbench` 只收工作台格式的包（要求 `dsh.client.inject` 含
   `dsh-desktop-workbenches`），2.0.0 是网页插件，请走上面的 CLI 或插件管理器。
 - 角色正文是第三方内容（MIT），只做 frontmatter 解析与去空白；不保证每个角色都适合你的业务。

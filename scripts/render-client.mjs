@@ -131,6 +131,9 @@ check('团队标签渲染出搜索/新建/预设等真实控件', team.html.incl
 const chat = renderWith('chat')
 check('会话标签渲染成功（无抛错）', !chat.errors.some((e) => e.startsWith('render 抛错')), chat.errors.find((e) => e.startsWith('render 抛错')))
 check('会话标签渲染出私聊/群聊/建群', chat.html.includes('私聊') && chat.html.includes('群聊') && chat.html.includes('建群'))
+// 没有选中会话时也必须有输入框：DS-Bot 的聊天页不会出现「空页没有输入框」。
+// SSR 不跑 useEffect，正好停在「一个会话都还没选中」的状态。
+check('会话标签未选中会话时也有输入框', chat.html.includes('ats-compose') && chat.html.includes('ats-area'), chat.html.includes('ats-area') ? undefined : '没有 textarea')
 
 const balance = renderWith('balance')
 check('额度标签渲染成功（无抛错）', !balance.errors.some((e) => e.startsWith('render 抛错')), balance.errors.find((e) => e.startsWith('render 抛错')))
