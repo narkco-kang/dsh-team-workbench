@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.63.0'
+const PLUGIN_VERSION = '2.64.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1518,6 +1518,72 @@ async function applyMemberAction(store, body, ctx) {
     store.members = store.members.filter((m) => m.id !== id)
     if (store.chiefId === id) store.chiefId = ''
     return store.members.length === before ? '找不到该成员' : null
+  }
+
+  // 拖拽：把一个成员变成某个部门的子智能体（成员本身被合并掉，聊天记录保留在会话里）。
+  if (action === 'dept-add-sub') {
+    const deptId = text(body.deptId)
+    const memberId = text(body.memberId)
+    const dept = store.members.find((m) => m.id === deptId && m.department !== null)
+    const member = store.members.find((m) => m.id === memberId)
+    if (dept === undefined) return '找不到部门智能体'
+    if (member === undefined) return '找不到要加入的成员'
+    if (dept.id === member.id) return '不能把部门加进它自己'
+    if (dept.department.subAgents.some((sub) => sub.name === member.name)) return '该成员已在部门里'
+    const route = (member.routes || [])[0]
+    dept.department.subAgents.push({
+      id: makeId('sub'),
+      name: member.name,
+      role: member.role,
+      emoji: member.emoji,
+      provider: route !== undefined ? route.provider : '',
+      model: route !== undefined ? route.model : '',
+      reasoningEffort: route !== undefined ? route.reasoningEffort : '',
+      roleRef: member.roleRef
+    })
+    store.members = store.members.filter((m) => m.id !== memberId)
+    if (store.chiefId === memberId) store.chiefId = ''
+    return null
+  }
+
+  // 拖拽：多个成员合成一个新部门（部门 = 一个智能体，成员变成子智能体）。
+  if (action === 'dept-create') {
+    const ids = (Array.isArray(body.ids) ? body.ids : []).map(text).filter((id) => id.length > 0)
+    if (ids.length < 2) return '至少需要 2 个成员才能组成部门'
+    const picked = store.members.filter((m) => ids.includes(m.id))
+    if (picked.length < 2) return '找不到足够的成员'
+    const subs = picked.map((member) => {
+      const route = (member.routes || [])[0]
+      return {
+        id: makeId('sub'),
+        name: member.name,
+        role: member.role,
+        emoji: member.emoji,
+        provider: route !== undefined ? route.provider : '',
+        model: route !== undefined ? route.model : '',
+        reasoningEffort: route !== undefined ? route.reasoningEffort : '',
+        roleRef: member.roleRef
+      }
+    })
+    const name = text(body.name).length > 0 ? text(body.name) : '新部门'
+    const lead = subs[0]
+    const dept = normalizeMember({
+      id: makeId('member'),
+      name,
+      role: '部门智能体 · ' + String(subs.length) + ' 个子智能体',
+      emoji: '🏢',
+      color: '',
+      groupId: picked[0].groupId,
+      instructions: '',
+      enabled: true,
+      routes: [{ id: makeId('route'), label: '部门主管', provider: lead.provider, model: lead.model, reasoningEffort: lead.reasoningEffort, enabled: true }],
+      department: { name, subAgents: subs }
+    })
+    dept.activeRouteId = dept.routes[0].id
+    store.members = store.members.filter((m) => !ids.includes(m.id))
+    if (ids.includes(store.chiefId)) store.chiefId = ''
+    store.members.push(dept)
+    return null
   }
 
   // 自动分配模型：把宿主目录里可解析的模型轮流分给部门子智能体（可选真实推理过滤）。
