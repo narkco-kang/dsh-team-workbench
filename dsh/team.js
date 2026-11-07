@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.60.0'
+const PLUGIN_VERSION = '2.60.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -644,7 +644,8 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
 
   const usable = outcomes.filter((entry) => entry.text.trim().length > 0)
   if (usable.length === 0) {
-    return { text: '部门里没有子智能体跑通（' + String(outcomes.length) + ' 个全部失败），请检查它们的模型配置。', stopReason: 'completed', detail: '', provider: '', model: '' }
+    const message = '部门里没有子智能体跑通（' + String(outcomes.length) + ' 个全部失败），请检查它们的模型配置。'
+    return { text: message, output: message, stopReason: 'completed', detail: '', provider: '', model: '' }
   }
   const digest = usable.map((entry) => '【' + entry.name + '】\n' + entry.text).join('\n\n')
   const synthPrompt = [
@@ -657,7 +658,9 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
     '请综合成一段最终答复：先给结论，再给关键依据/风险；不要罗列“某某说”，也不要暴露内部流程。'
   ].join('\n')
   const synth = await dispatchToMember(ctx, parent, member, synthPrompt, signal)
-  return { text: text(synth.output), stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
+  const finalText = text(synth.output)
+  // 同时给 text 与 output：部门派发既被聊天用（读 text），也被 agent_team_task 用（读 output）。
+  return { text: finalText, output: finalText, stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
 }
 
 /** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
