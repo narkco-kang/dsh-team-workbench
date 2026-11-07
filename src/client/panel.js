@@ -389,6 +389,9 @@ window.__ModuleLoader__.load({
       "@keyframes btThinkingPulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}",
       ".ats-thinking-sec{opacity:.75;font-variant-numeric:tabular-nums;}",
       ".ats-thinking-hint{opacity:.55;}",
+      ".ats-stats{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;max-width:1000px;padding:6px 8px 0;font-size:10.5px;color:var(--bt-ink-3);font-variant-numeric:tabular-nums;}",
+      ".ats-stats-item{white-space:nowrap;}",
+      ".ats-stats-item.muted{opacity:.65;}",
       ".ats-thinking-label{font-size:10.5px;letter-spacing:.04em;padding:1px 6px;border-radius:999px;background:rgba(77,107,254,.12);color:var(--bt-accent);}",
       ".ats-thinking-trail{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;}",
       ".ats-thinking-chip{font-size:10.5px;padding:1px 6px;border-radius:999px;background:rgba(20,20,20,.06);color:var(--bt-ink-2);}",
@@ -2332,6 +2335,30 @@ window.__ModuleLoader__.load({
         setMention({ open: false, query: "", index: 0, start: 0 });
         if (el) setTimeout(function () { el.focus(); el.selectionStart = el.selectionEnd = (before + "@" + pick.name + " ").length; }, 0);
       };
+      // 宿主会话的 token / 缓存命中率（来自 DSH session projcache，只读）。
+      var statsState = useState(null);
+      var sessionStats = statsState[0];
+      var setSessionStats = statsState[1];
+      var fmtTokens = function (value) {
+        var n = Number(value) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+        return String(Math.round(n));
+      };
+      useEffect(function () {
+        var alive = true;
+        var loadStats = function () {
+          fetch("/api/team-workbench/session-stats?sessionId=" + encodeURIComponent(sessionId), { cache: "no-store" })
+            .then(function (res) { return res.json(); })
+            .then(function (payload) { if (alive && payload.ok === true) setSessionStats(payload.stats || null); })
+            .catch(function () { /* 统计失败不影响聊天 */ });
+        };
+        loadStats();
+        var timer = setInterval(loadStats, 5000);
+        return function () { alive = false; clearInterval(timer); };
+      }, [sessionId]);
+
       // 草稿清空后把输入框高度收回去（自动撑高只应发生于有内容时）。
       useEffect(function () {
         var el = areaRef && areaRef.current;
@@ -3405,7 +3432,16 @@ window.__ModuleLoader__.load({
                   "识别中…（" + String(sttSettings.model || "medium") + (sttSettings.reviewEnabled === true ? " · 校对" : "") + "）") : null,
                 h("span", { className: "ats-spacer" }),
                 h("button", { className: "ats-send", type: "button", "data-tip": busy ? "等待回复" : "发送", "data-tip-side": "top", "aria-label": busy ? "等待回复" : "发送", disabled: busy || target === null || draft.trim().length === 0, onClick: send }, busy ? "⏳" : "➤")
-              )
+              ),
+              sessionStats !== null
+                ? h("div", { className: "ats-stats" },
+                    h("span", { className: "ats-stats-item" }, "⟳ " + String(sessionStats.turns) + " 轮 " + String(sessionStats.steps) + " 步"),
+                    sessionStats.tokPerSec > 0 ? h("span", { className: "ats-stats-item" }, "· " + sessionStats.tokPerSec.toFixed(0) + " tok/s") : null,
+                    h("span", { className: "ats-stats-item" }, "🗃 " + fmtTokens(sessionStats.totalTokens) + " tok"),
+                    h("span", { className: "ats-stats-item" }, "· 缓存命中 " + (sessionStats.cacheHitRate * 100).toFixed(1) + "%"),
+                    h("span", { className: "ats-stats-item muted" }, "· 本轮 " + fmtTokens((sessionStats.lastOutputTokens || 0) + (sessionStats.lastInputTokens || 0)))
+                  )
+                : null
             )
           )
         ),

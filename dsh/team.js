@@ -17,7 +17,7 @@
  * @module dsh-team-workbench/dsh/team
  */
 
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readBalances, writeKey } from './balance.js'
@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.68.0'
+const PLUGIN_VERSION = '2.69.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -2207,6 +2207,53 @@ export function apply(ctx, config) {
         member.avatar = { kind: 'image', imageId: id }
         await saveStore(store)
         return json(await snapshot())
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    // 宿主会话的 token / 缓存命中率：读 DSH 自己的 session projcache（只读）。
+    path: ROUTE_BASE + '/session-stats',
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const url = new URL(request.url, 'http://localhost')
+        const sessionId = text(url.searchParams.get('sessionId'))
+        if (sessionId.length === 0) return json({ ok: true, stats: null })
+        const dir = join(harnessHome(), 'storages', 'session_projcache', 'sessions')
+        let names = []
+        try { names = await readdir(dir) } catch { return json({ ok: true, stats: null }) }
+        const wanted = names.filter((name) => name.endsWith('.json') && (name === sessionId + '.json' || name === 'session-' + sessionId + '.json' || name.indexOf(sessionId) >= 0))
+        if (wanted.length === 0) return json({ ok: true, stats: null })
+        const raw = JSON.parse(await readFile(join(dir, wanted[0]), 'utf8'))
+        const rows = raw?.record?.rows ?? {}
+        const totals = rows?.tokenUsage?.val?.totals
+        const sessionStats = rows?.sessionStats?.val
+        if (totals === undefined || sessionStats === undefined) return json({ ok: true, stats: null })
+        const uncached = Number(totals.uncachedInputTokens) || 0
+        const cacheRead = Number(totals.cacheReadTokens) || 0
+        const cacheWrite = Number(totals.cacheWriteTokens) || 0
+        const output = Number(totals.outputTokens) || 0
+        const input = uncached + cacheRead + cacheWrite
+        const decodeMs = Number(sessionStats.decodeMs) || 0
+        const decodeTokens = Number(sessionStats.decodeTokens) || 0
+        return json({
+          ok: true,
+          stats: {
+            turns: Number(sessionStats.turns) || 0,
+            steps: Number(sessionStats.steps) || 0,
+            inputTokens: input,
+            outputTokens: output,
+            totalTokens: input + output,
+            cacheHitRate: input > 0 ? cacheRead / input : 0,
+            tokPerSec: decodeMs > 0 ? (decodeTokens / (decodeMs / 1000)) : 0,
+            llmMs: Number(sessionStats.llmMs) || 0,
+            toolMs: Number(sessionStats.toolMs) || 0
+          }
+        })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }

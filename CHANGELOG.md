@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.69.0 — 2026-11-08
+
+- 输入框下方新增 **token / 缓存命中率统计行**：`⟳ 978 轮 7676 步 · 192 tok/s | 🗃 3.60B tok · 缓存命中 99.5%`，
+  数据来自宿主 `storages/session_projcache/sessions/<id>.json`（tokenUsage.totals + sessionStats），只读，5 秒刷新；
+- 新路由 `/api/team-workbench/session-stats?sessionId=`（路由总数 25 → 26）；
+- 真实会话实测：turns=978 steps=7676 cacheHitRate=99.48% tok/s=192.5。
+
 ## 2.68.0 — 2026-11-08
 
 - 输入框上方新增 DSH 式思考条：左侧胶囊「深度求索中，用时 N 秒」，随后「谁在思考」、
