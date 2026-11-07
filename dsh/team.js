@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.86.0'
+const PLUGIN_VERSION = '2.86.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -882,7 +882,8 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
   for (const route of candidates) {
     const started = Date.now()
     // 单条路由 45 秒还没出结果就换下一条（慢模型不该把整轮拖到分钟级）。
-    const bounds = signal !== undefined && signal !== null ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)
+    // 健康路由 P50 约 3–5 秒；20 秒还没结果就换下一条，避免一条慢路由把整轮拖到 45 秒。
+    const bounds = signal !== undefined && signal !== null ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000)
     let result
     try {
       // 优先复用常驻 Agent（省掉 ~3s 会话装配）；拿不到句柄或失败就退回一次性激活。

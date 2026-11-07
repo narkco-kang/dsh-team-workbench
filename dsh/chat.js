@@ -65,6 +65,7 @@ const UPLOAD_ROUTE = ROUTE_BASE + '/upload'
 const SCHEDULE_ROUTE = ROUTE_BASE + '/schedules'
 const TTS_ROUTE = ROUTE_BASE + '/tts'
 const TICKETS_ROUTE = ROUTE_BASE + '/tickets'
+const ABORT_ROUTE = ROUTE_BASE + '/chats/abort'
 const AUDIT_ROUTE = ROUTE_BASE + '/audit'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
@@ -1667,6 +1668,37 @@ function registerChatTools(ctx) {
         return new Response(Buffer.from(hex, 'hex'), { status: 200, headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' } })
       } catch (error) {
         return json({ ok: false, error: String(error), fallback: 'browser' }, 500)
+      }
+    }
+  }))
+
+  // ── 强制结束当前一轮：宿主卡住时不用重启也能让群恢复可用 ──────────────────
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: ABORT_ROUTE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const body = await readJson(request)
+        const kind = text(body?.kind) === 'private' ? 'p' : 'g'
+        const id = text(body?.id)
+        if (id.length === 0) return json({ ok: false, error: '缺少会话 id' }, 400)
+        const key = kind + ':' + id
+        const was = busy.has(key)
+        busy.delete(key)
+        clearSteerTarget(key)
+        const chats = await loadChats()
+        const room = kind === 'g' ? chats.rooms.find((entry) => entry.id === id) : undefined
+        if (room !== undefined && room.progress) {
+          room.progress.finishedAt = new Date().toISOString()
+          room.progress.current = ''
+          room.progress.parallel = []
+          room.progress.queued = []
+          await saveChats(chats)
+        }
+        return json({ ok: true, aborted: was })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
       }
     }
   }))
