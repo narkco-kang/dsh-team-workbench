@@ -427,7 +427,7 @@ async function parentOf(ctx, sessionId) {
   return undefined
 }
 
-const MEMBER_HARD_TIMEOUT_MS = 45000
+const MEMBER_HARD_TIMEOUT_MS = 90000
 
 async function runMember(ctx, parent, member, prompt, signal) {
   // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
@@ -601,19 +601,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     await persist()
     // 短消息（≤40 字）直接由该成员自己回答，跳过部门「选人→并行→汇总」，
     // 否则一条「OK」也要经历 3 次模型往返。
-    // 群聊里的部门成员默认「主管直接答」：不再走选人→并行→汇总。
-    // 实测部门流水线在群里经常 45 秒超时且返回空内容，用户只想要一句答复。
-    const deptInGroup = process.env.TW_DEPT_IN_GROUP === '1'
-    const isDepartment = member.department !== null && member.department !== undefined
-    let raw
-    if (isDepartment && !deptInGroup) {
-      const direct = await dispatchToMember(ctx, parent, member, prompt, signal)
-      // dispatchToMember 返回 output，聊天层读 text；不补这一行会让回复变成空串（面板没结果）。
-      const answer = text(direct.output) || (direct.stopReason === 'timeout' ? '（这一轮超时了，已放弃等待；可以直接重发）' : '')
-      raw = { ...direct, text: answer }
-    } else {
-      raw = await runMember(ctx, parent, member, prompt, signal)
-    }
+    // 部门成员一律走「主管 → 全部子智能体并行 → 主管汇总」。
+    const raw = await runMember(ctx, parent, member, prompt, signal)
     const reply = { ...raw, text: stripReceipts(raw.text) }
     step.phase = 'done'
     step.ms = Date.now() - Date.parse(step.startedAt)

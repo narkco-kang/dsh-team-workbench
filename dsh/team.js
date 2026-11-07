@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.88.0'
+const PLUGIN_VERSION = '2.89.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -774,24 +774,10 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
     '只输出 JSON，不要解释：{"picks":[{"name":"子智能体名字","task":"它要做什么"}]}'
   ].join('\n')
 
-  // 短问题（打招呼、单句确认）由主管直接回答：走完整「选人→并行→汇总」要 3 次模型往返，
-  // 对这类输入纯属浪费，通常会把 5 秒拖成 30 秒。
-  const plainTask = task.trim()
-  if (plainTask.length > 0 && plainTask.length <= 40 && !plainTask.includes('\n')) {
-    const direct = await dispatchToMember(ctx, parent, member, task, signal)
-    const answer = text(direct.output)
-    return { text: answer, output: answer, stopReason: direct.stopReason, detail: direct.detail, provider: direct.provider, model: direct.model, attempts: direct.attempts ?? [], picks: [] }
-  }
-
-  let picks = []
-  // 子智能体不超过 4 个时直接按关键词选人，省掉一次主管排期调用（通常 4–30 秒）。
-  if (subs.length > 4) {
-    try {
-      const plan = await dispatchToMember(ctx, parent, member, planPrompt, signal)
-      picks = parsePicks(plan.output, subs)
-    } catch { /* 主管挑人失败就用字面匹配兜底 */ }
-  }
-  if (picks.length === 0) picks = keywordPicks(task, subs)
+  // 部门协作 = 主管把任务发给**全部**子智能体，各自从职责角度产出，再由主管汇总。
+  // 不再「先选人」：选人会让未被选中的成员永远不参与，也就失去了部门的意义。
+  const fanoutLimit = Math.max(1, Math.min(12, subs.length))
+  const picks = subs.slice(0, fanoutLimit).map((sub) => ({ sub, task: '' }))
 
   const outcomes = await Promise.all(picks.map(async (pick) => {
     const sub = subAgentMember(department.name, pick.sub)
@@ -808,7 +794,11 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
       '不需要写代码；若必须调用 run_code，请用 ES module 语法（import / await），不要用 require。'
     ].filter((line) => line.length > 0).join('\n')
     try {
-      const result = await dispatchToMember(ctx, parent, target, prompt, signal)
+      // 每个子智能体最多 30 秒；一个慢成员不能拖住整轮汇总。
+      const result = await Promise.race([
+        dispatchToMember(ctx, parent, target, prompt, signal),
+        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 30000))
+      ])
       return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed', attempts: result.attempts ?? [] }
     } catch (error) {
       return { name: sub.name, text: '', ok: false, error: String(error) }
