@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.47.0'
+const PLUGIN_VERSION = '2.48.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1673,11 +1673,24 @@ export function apply(ctx, config) {
   const snapshot = async () => {
     const store = await loadStore()
     const catalog = await collectCatalog(ctx)
+    // 成员所属部门：部门成员用 department.name；从角色库导入的按角色分类补一个展示名。
+    let roleCats = new Map()
+    try {
+      const index = await loadRoleIndex()
+      roleCats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+    } catch { /* 角色库缺失不影响快照 */ }
+    const withDepartment = (members) => members.map((member) => ({
+      ...member,
+      departmentName: member.department !== null && member.department !== undefined
+        ? member.department.name
+        : (member.roleRef.id.length > 0 ? (roleCats.get(member.roleRef.id) || '') : ''),
+      subAgentCount: member.department !== null && member.department !== undefined ? member.department.subAgents.length : 0
+    }))
     return {
       ok: true,
       pluginVersion: PLUGIN_VERSION,
       version: STORE_VERSION,
-      members: store.members,
+      members: withDepartment(store.members),
       chiefId: store.chiefId || '',
       groups: store.groups,
       preset: store.preset,

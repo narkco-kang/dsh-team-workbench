@@ -54,7 +54,12 @@ const rolesPayload = {
 const now = new Date('2026-11-07T00:30:00+08:00').toISOString()
 const chatsPayload = {
   ok: true,
-  private: members.map((m, i) => ({ memberId: m.id, name: m.name, emoji: m.emoji, color: m.color, count: i < 2 ? 2 : 0, lastText: i === 0 ? '这个需求的验收标准我来拆一下' : '', updatedAt: now })),
+  private: members.map((m, i) => ({
+    memberId: m.id, name: m.name, emoji: m.emoji, color: m.color, count: i < 2 ? 2 : 0,
+    lastText: i === 0 ? '这个需求的验收标准我来拆一下' : '', updatedAt: now,
+    departmentName: i >= 9 ? (i >= 14 ? '营销部' : '测试部') : (i === 8 ? '安全部' : ''),
+    subAgentCount: i === 8 ? 12 : 0
+  })),
   rooms: [
     { id: 'chief-desk', name: '总管 · 用户对接', chief: true, adminId: members[0].id, adminName: members[0].name, memberIds: members.map(m => m.id), count: 2, lastText: '我来安排：@工程师 你评估一下', updatedAt: now },
     { id: 'room-demo', name: '项目例会', adminId: members[0].id, adminName: members[0].name, memberIds: [members[0].id, members[2].id, members[3].id], count: 3, lastText: '工程侧两天可以完成', updatedAt: now }

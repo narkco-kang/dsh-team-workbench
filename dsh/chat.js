@@ -13,6 +13,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { loadRoleIndex } from './library.js'
 import {
   ROUTE_BASE,
   dispatchToMember,
@@ -623,6 +624,14 @@ export async function chatOverview(ctx) {
   const chats = await loadChats()
   if (ensureChiefRoom(chats, store)) await saveChats(chats)
   const byId = new Map(store.members.map((m) => [m.id, m]))
+  let roleCats = new Map()
+  try {
+    const index = await loadRoleIndex()
+    roleCats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+  } catch { /* 角色库缺失时部门名留空 */ }
+  const departmentOf = (member) => member.department !== null && member.department !== undefined
+    ? member.department.name
+    : (member.roleRef.id.length > 0 ? (roleCats.get(member.roleRef.id) || '') : '')
   const lastOf = (messages) => (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1] : null)
   return {
     ok: true,
@@ -637,7 +646,9 @@ export async function chatOverview(ctx) {
         color: member.color,
         count: thread && Array.isArray(thread.messages) ? thread.messages.length : 0,
         lastText: last ? last.text.slice(0, 120) : '',
-        updatedAt: thread ? thread.updatedAt : ''
+        updatedAt: thread ? thread.updatedAt : '',
+        departmentName: departmentOf(member),
+        subAgentCount: member.department !== null && member.department !== undefined ? member.department.subAgents.length : 0
       }
     }),
     rooms: chats.rooms.map((room) => {
