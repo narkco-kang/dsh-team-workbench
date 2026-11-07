@@ -1,14 +1,14 @@
 /**
- * dsh-team-workbench / 会话记忆（L0–L3 分层）
+ * dsh-team-workbench / 会话记忆（L0–L3 分层 + BM25 召回）
  *
- * 参考 TencentCloud/TencentDB-Agent-Memory 的分层思路（不是照搬服务）：
- *   L0 对话：chats.json 的原始消息（每条会话各自一份）
- *   L1 原子事实：atoms[]，可带 key（同一 key 的新事实覆盖旧的），带重要度与来源消息
- *   L2 场景摘要：l2.summary，一段会话最近一次压缩出的场景块
- *   L3 用户画像：persona.items[]，跨会话共享的偏好/目标/约束
+ * 参考 TencentCloud/TencentDB-Agent-Memory 的分层思路（不是接它的服务）：
+ *   L0 对话：chats.json 的原始消息
+ *   L1 原子事实：atoms[]，带 key / 重要度 / 来源消息 / 访问计数
+ *   L2 场景摘要：l2.summary
+ *   L3 用户画像：persona.items[]
  *
- * 召回是「渐进披露」：提示词里只放 L3 画像 + L2 摘要 + 按当前消息打分的前 K 条原子事实，
- * 其余事实留在文件里，靠「记忆」面板或 /memory?q= 下钻，避免把所有事实一股脑塞进上下文。
+ * 召回：BM25（中文按二元组切词）+ 重要度 + 时间衰减 + 访问强化，取前 K 条；
+ * 记忆面板里还能按关键词跨会话检索（渐进披露的下钻入口）。
  *
  * 存储：$DSH_HOME/team-workbench/memory.json（version 2）
  */
@@ -24,6 +24,9 @@ const MAX_PERSONA = 12
 const MAX_SUMMARY = 1600
 const RECALL_LIMIT = 6
 const TRANSCRIPT_FOR_COMPACT = 40
+const BM25_K1 = 1.2
+const BM25_B = 0.75
+const SIMILARITY_MERGE = 0.8
 
 function memoryPath() {
   return join(harnessHome(), 'team-workbench', MEMORY_FILE)
@@ -33,17 +36,37 @@ function emptyMemory() {
   return { version: MEMORY_VERSION, persona: { items: [], updatedAt: '' }, private: {}, rooms: {} }
 }
 
+/** 中文按二元组、英文按词切；去重由调用方决定。 */
+export function tokenize(value) {
+  const lower = text(value).toLowerCase()
+  const out = []
+  for (const word of lower.match(/[a-z0-9]+/g) || []) out.push(word)
+  const cjk = lower.replace(/[^\u4e00-\u9fa5]+/g, ' ')
+  for (const segment of cjk.split(/\s+/)) {
+    for (let index = 0; index + 1 < segment.length; index += 1) out.push(segment.slice(index, index + 2))
+  }
+  return out
+}
+
+function jaccardSimilar(a, b) {
+  const left = new Set(tokenize(a))
+  const right = new Set(tokenize(b))
+  if (left.size === 0 || right.size === 0) return 0
+  let common = 0
+  for (const token of left) if (right.has(token)) common += 1
+  return common / (left.size + right.size - common)
+}
+
 /** 读取记忆；v1（summary + facts）就地升级成 v2。 */
 export async function loadMemory() {
   try {
     const parsed = JSON.parse(await readFile(memoryPath(), 'utf8'))
-    const memory = {
+    return {
       version: MEMORY_VERSION,
       persona: normalizePersona(parsed?.persona),
       private: migrateBag(parsed?.private),
       rooms: migrateBag(parsed?.rooms)
     }
-    return memory
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn('[team-workbench] 读取会话记忆失败：' + String(error))
     return emptyMemory()
@@ -52,7 +75,9 @@ export async function loadMemory() {
 
 function normalizePersona(value) {
   const items = Array.isArray(value?.items)
-    ? value.items.map((item) => ({ id: text(item?.id) || makeId('persona'), text: text(item?.text).slice(0, 300), at: text(item?.at) })).filter((item) => item.text.length > 0)
+    ? value.items
+        .map((item) => ({ id: text(item?.id) || makeId('persona'), text: text(item?.text).slice(0, 300), at: text(item?.at) }))
+        .filter((item) => item.text.length > 0)
     : []
   return { items: items.slice(-MAX_PERSONA), updatedAt: text(value?.updatedAt) }
 }
@@ -84,7 +109,8 @@ function normalizeAtom(raw) {
     key: text(raw?.key).trim().slice(0, 80),
     importance: Number.isFinite(Number(raw?.importance)) ? Math.max(1, Math.min(5, Math.round(Number(raw.importance)))) : 3,
     at: text(raw?.at) || new Date().toISOString(),
-    from: text(raw?.from)
+    from: text(raw?.from),
+    hits: Number.isFinite(Number(raw?.hits)) ? Math.max(0, Math.round(Number(raw.hits))) : 0
   }
 }
 
@@ -108,45 +134,77 @@ export function slotOf(memory, kind, id) {
   return slot
 }
 
-/** 关键词打分：二元组重合 + 重要度 + 时间衰减；同 key 的事实只留最新一条。 */
-function scoreOf(atom, lower) {
-  let score = atom.importance
-  let matched = 0
-  if (lower.length > 0) {
-    const hay = atom.text.toLowerCase()
-    for (let i = 0; i < lower.length - 1; i += 1) {
-      const gram = lower.slice(i, i + 2)
-      if (gram.trim().length === 2 && hay.includes(gram)) { score += 3; matched += 1 }
-    }
+/** 一组事实的 BM25 统计（df / 平均长度）。 */
+function atomStats(atoms) {
+  const df = new Map()
+  let total = 0
+  for (const atom of atoms) {
+    const terms = new Set(tokenize(atom.text))
+    total += terms.size
+    for (const term of terms) df.set(term, (df.get(term) || 0) + 1)
   }
-  const age = (Date.now() - Date.parse(atom.at || '')) / 86400000
-  if (Number.isFinite(age)) score += Math.max(0, 2 - age / 30)
-  return { score, matched }
+  return { df, N: atoms.length, avg: atoms.length > 0 ? total / atoms.length : 0 }
 }
 
-/** 按当前用户消息召回事实；没有关键词时按重要度/时间取前几条。 */
-export function recallAtoms(slot, userText, limit = RECALL_LIMIT) {
-  const lower = text(userText).toLowerCase()
+function bm25(atom, queryTerms, stats) {
+  const terms = tokenize(atom.text)
+  const length = terms.length
+  const tf = new Map()
+  for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1)
+  let score = 0
+  for (const term of queryTerms) {
+    const freq = tf.get(term) || 0
+    if (freq === 0) continue
+    const df = stats.df.get(term) || 0
+    const idf = Math.log(1 + (stats.N - df + 0.5) / (df + 0.5))
+    const norm = freq + BM25_K1 * (1 - BM25_B + BM25_B * length / (stats.avg || 1))
+    score += idf * (freq * (BM25_K1 + 1)) / norm
+  }
+  return score
+}
+
+function recencyBoost(atom) {
+  const age = (Date.now() - Date.parse(atom.at || '')) / 86400000
+  if (!Number.isFinite(age)) return 0
+  return Math.max(0, 2 - age / 30)
+}
+
+/** 同 key 只留最新；按 BM25 + 重要度 + 新鲜度 + 访问次数排序。 */
+function rankAtoms(atoms, userText) {
+  const queryTerms = new Set(tokenize(userText))
+  const stats = atomStats(atoms)
   const byKey = new Map()
-  for (const atom of slot.atoms) {
+  for (const atom of atoms) {
     if (atom.key.length === 0) continue
     const previous = byKey.get(atom.key)
     if (previous === undefined || String(atom.at) > String(previous.at)) byKey.set(atom.key, atom)
   }
-  const merged = slot.atoms.filter((atom) => atom.key.length === 0 || byKey.get(atom.key) === atom)
+  const merged = atoms.filter((atom) => atom.key.length === 0 || byKey.get(atom.key) === atom)
   return merged
-    .map((atom) => { const { score, matched } = scoreOf(atom, lower); return { atom, score, matched } })
-    // 命中关键词的排前面；同样命中时再比重要度与新鲜度。
-    .sort((a, b) => Number(b.matched > 0) - Number(a.matched > 0) || b.score - a.score)
-    .slice(0, limit)
-    .map((entry) => entry.atom)
+    .map((atom) => {
+      const relevance = queryTerms.size > 0 ? bm25(atom, queryTerms, stats) : 0
+      const score = relevance * 3 + atom.importance + recencyBoost(atom) + Math.min(2, atom.hits * 0.4)
+      return { atom, score, relevant: relevance > 0 }
+    })
+    .sort((a, b) => Number(b.relevant) - Number(a.relevant) || b.score - a.score)
+}
+
+/** 按当前用户消息召回事实；没有关键词时按重要度/新鲜度取前几条。 */
+export function recallAtoms(slot, userText, limit = RECALL_LIMIT) {
+  return rankAtoms(slot.atoms, userText).slice(0, limit).map((entry) => entry.atom)
+}
+
+/** 被召回的事实累加 hits，下次更容易被想起（访问强化）。 */
+export function touchAtoms(atoms) {
+  for (const atom of atoms) atom.hits = (atom.hits || 0) + 1
 }
 
 /** 记忆块：L3 画像 + L2 场景 + 召回的 L1 事实。 */
 export function memoryBlock(slot, persona, userText) {
   const parts = []
-  const items = persona !== undefined && persona !== null && Array.isArray(persona.items) ? persona.items : []
-  if (items.length > 0) parts.push('【用户画像】' + items.map((item) => item.text).join('；'))
+  if (persona !== undefined && persona !== null && Array.isArray(persona.items) && persona.items.length > 0) {
+    parts.push('【用户画像】' + persona.items.map((item) => item.text).join('；'))
+  }
   if (slot !== undefined && slot !== null && slot.l2.summary.trim().length > 0) parts.push('【本会话场景】' + slot.l2.summary.trim())
   const atoms = slot !== undefined && slot !== null ? recallAtoms(slot, userText, RECALL_LIMIT) : []
   if (atoms.length > 0) parts.push('【相关事实】' + atoms.map((atom) => atom.text).join('；'))
@@ -154,15 +212,15 @@ export function memoryBlock(slot, persona, userText) {
   return ['【长期记忆】', ...parts, '（记忆可能过时，和新消息冲突时以新消息为准。）'].join('\n')
 }
 
-/** 写一条原子事实；同 key 覆盖、同文本去重，超出上限时丢掉分最低的。 */
+/** 写一条原子事实；同 key 覆盖、近重复合并、超出上限时丢掉分最低的。 */
 export function addAtom(slot, raw) {
   const atom = normalizeAtom(raw)
   if (atom.text.length === 0) return false
-  if (slot.atoms.some((item) => item.text === atom.text)) return false
+  if (slot.atoms.some((item) => item.text === atom.text || jaccardSimilar(item.text, atom.text) >= SIMILARITY_MERGE)) return false
   if (atom.key.length > 0) slot.atoms = slot.atoms.filter((item) => item.key !== atom.key)
   slot.atoms.push(atom)
   if (slot.atoms.length > MAX_ATOMS) {
-    const keep = new Set(recallAtoms({ atoms: slot.atoms }, '', MAX_ATOMS).map((item) => item.id))
+    const keep = new Set(rankAtoms(slot.atoms, '').slice(0, MAX_ATOMS).map((entry) => entry.atom.id))
     slot.atoms = slot.atoms.filter((item) => keep.has(item.id))
   }
   return true
@@ -176,7 +234,8 @@ export function removeAtom(slot, atomId) {
 
 export function addPersona(persona, body) {
   const value = text(body).trim().slice(0, 300)
-  if (value.length === 0 || persona.items.some((item) => item.text === value)) return false
+  if (value.length === 0) return false
+  if (persona.items.some((item) => item.text === value || jaccardSimilar(item.text, value) >= SIMILARITY_MERGE)) return false
   persona.items.push({ id: makeId('persona'), text: value, at: new Date().toISOString() })
   if (persona.items.length > MAX_PERSONA) persona.items = persona.items.slice(-MAX_PERSONA)
   return true
@@ -185,7 +244,26 @@ export function addPersona(persona, body) {
 export function removePersona(persona, itemId) {
   const before = persona.items.length
   persona.items = persona.items.filter((item) => item.id !== itemId)
-  return before !== persona.items.length
+  return persona.items.length !== before
+}
+
+/** 跨会话检索事实：记忆面板的关键词下钻。 */
+export function searchMemory(memory, query, limit = 30) {
+  const rows = []
+  for (const [id, slot] of Object.entries(memory.private)) {
+    for (const atom of slot.atoms) rows.push({ kind: 'private', id, atom })
+  }
+  for (const [id, slot] of Object.entries(memory.rooms)) {
+    for (const atom of slot.atoms) rows.push({ kind: 'room', id, atom })
+  }
+  const terms = new Set(tokenize(query))
+  if (terms.size === 0) return rows.slice(0, limit)
+  const stats = atomStats(rows.map((row) => row.atom))
+  return rows
+    .map((row) => ({ ...row, score: bm25(row.atom, terms, stats) }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
 }
 
 function parseCompaction(raw) {
@@ -245,6 +323,7 @@ export async function compactIfNeeded(ctx, parent, kind, id, messages, member, p
   for (const atom of parsed.atoms) addAtom(slot, { ...atom, from: lastUser ? lastUser.id : '' })
   for (const item of parsed.persona) addPersona(memory.persona, item)
   if (parsed.persona.length > 0) memory.persona.updatedAt = new Date().toISOString()
+  touchAtoms(slot.atoms.slice(-parsed.atoms.length - 3))
   slot.since = messages.length
   slot.updatedAt = new Date().toISOString()
   await saveMemory(memory)

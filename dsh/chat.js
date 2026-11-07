@@ -23,7 +23,7 @@ import {
   readJson,
   text
 } from './team.js'
-import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, removeAtom, removePersona, saveMemory, slotOf } from './memory.js'
+import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, removeAtom, removePersona, saveMemory, searchMemory, slotOf } from './memory.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -616,7 +616,21 @@ export function apply(ctx) {
           const kind = url.searchParams.get('kind') === 'room' ? 'room' : 'private'
           const id = url.searchParams.get('id') || ''
           const memory = await loadMemory()
-          if (id.length === 0) return json({ ok: true, persona: memory.persona, private: memory.private, rooms: memory.rooms })
+          const q = url.searchParams.get('q') || ''
+          if (id.length === 0) {
+            if (q.trim().length === 0) return json({ ok: true, persona: memory.persona, private: memory.private, rooms: memory.rooms })
+            const store = await loadStore()
+            const names = new Map(store.members.map((member) => ['private:' + member.id, member.name]))
+            for (const room of (await loadChats()).rooms) names.set('room:' + room.id, room.name)
+            const hits = searchMemory(memory, q, 30).map((row) => ({
+              kind: row.kind,
+              id: row.id,
+              conversationName: names.get(row.kind + ':' + row.id) || row.id,
+              atom: row.atom,
+              score: row.score
+            }))
+            return json({ ok: true, q, total: hits.length, hits })
+          }
           const slot = slotOf(memory, kind, id)
           // 兼容旧的 summary/facts 字段名，同时给出分层的 l2/atoms 与画像。
           return json({

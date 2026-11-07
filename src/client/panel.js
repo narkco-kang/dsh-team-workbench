@@ -389,6 +389,9 @@ window.__ModuleLoader__.load({
     function fetchMemory(kind, id) {
       return fetch("/api/team-workbench/memory?kind=" + encodeURIComponent(kind) + "&id=" + encodeURIComponent(id), { cache: "no-store" }).then(unwrap);
     }
+    function searchMemoryServer(q) {
+      return fetch("/api/team-workbench/memory?q=" + encodeURIComponent(q), { cache: "no-store" }).then(unwrap);
+    }
     function postMemory(body) {
       return fetch("/api/team-workbench/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(unwrap);
     }
@@ -1547,6 +1550,18 @@ window.__ModuleLoader__.load({
       var memoryFactState = useState("");
       var memoryFact = memoryFactState[0];
       var setMemoryFact = memoryFactState[1];
+      var memoryQueryState = useState("");
+      var memoryQuery = memoryQueryState[0];
+      var setMemoryQuery = memoryQueryState[1];
+      var memoryHitsState = useState({ q: "", hits: [] });
+      var memoryHits = memoryHitsState[0];
+      var setMemoryHits = memoryHitsState[1];
+      var runMemorySearch = function () {
+        var q = memoryQuery.trim();
+        if (q.length === 0) { setMemoryHits({ q: "", hits: [] }); return; }
+        searchMemoryServer(q).then(function (payload) { setMemoryHits({ q: q, hits: payload.hits || [] }); })
+          .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); });
+      };
 
       var loadMemorySlot = function () {
         if (target === null) return;
@@ -1860,7 +1875,41 @@ window.__ModuleLoader__.load({
         memoryOpen && target !== null
           ? h("div", { className: "ats-im-form", style: { maxHeight: "60%", overflow: "auto" } },
               h("div", { className: "ats-preset-title" }, "长期记忆 · " + (currentRoom ? currentRoom.name : title)),
-              h("div", { className: "ats-sub", style: { margin: "4px 0 2px" } }, "L3 用户画像（跨会话共享）"),
+              h("div", { className: "ats-bar", style: { margin: "6px 0" } },
+                h("input", {
+                  className: "ats-input", style: { flex: "1 1 auto" }, value: memoryQuery,
+                  placeholder: "跨会话检索记忆：例如 验收 / 偏好",
+                  onChange: function (e) { setMemoryQuery(e.target.value); },
+                  onKeyDown: function (e) { if (e.key === "Enter") { e.preventDefault(); runMemorySearch(); } }
+                }),
+                h("button", { className: "ats-btn tiny", type: "button", onClick: runMemorySearch }, "检索"),
+                h("button", { className: "ats-btn tiny", type: "button", onClick: function () { setMemoryQuery(""); setMemoryHits({ q: "", hits: [] }); } }, "清除")
+              ),
+              memoryHits.q.length > 0
+                ? h("div", null,
+                    h("div", { className: "ats-sub", style: { margin: "2px 0 4px" } }, "「" + memoryHits.q + "」命中 " + String(memoryHits.hits.length) + " 条"),
+                    memoryHits.hits.length === 0
+                      ? h("div", { className: "ats-sub", style: { opacity: .6 } }, "没有命中")
+                      : h("div", { className: "ats-check-list", style: { flexDirection: "column", alignItems: "stretch", maxHeight: "150px" } },
+                          memoryHits.hits.map(function (hit) {
+                            return h("button", {
+                              key: hit.kind + ":" + hit.id + ":" + hit.atom.id, type: "button", className: "ats-hit",
+                              onClick: function () {
+                                if (hit.kind === "room") pickRoom(hit.id); else pickPrivate(hit.id);
+                                setMemoryOpen(false);
+                              }
+                            },
+                              h("span", { className: "ats-hit-kind" + (hit.kind === "group" ? " group" : "") }, hit.kind === "room" ? "群" : "私"),
+                              h("span", { className: "ats-hit-meta" },
+                                h("span", { className: "ats-hit-head" }, h("span", { className: "ats-hit-name" }, hit.conversationName)),
+                                h("span", { className: "ats-hit-text" }, hit.atom.text)
+                              )
+                            );
+                          })
+                        )
+                  )
+                : null,
+              h("div", { className: "ats-preset-title", style: { margin: "4px 0 2px" } }, "L3 用户画像（跨会话共享）"),
               (memoryData.persona && memoryData.persona.items || []).length === 0
                 ? h("div", { className: "ats-sub", style: { opacity: .6 } }, "（还没有画像。）")
                 : h("div", { className: "ats-check-list", style: { flexDirection: "column", alignItems: "stretch", maxHeight: "110px" } },
