@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.72.4'
+const PLUGIN_VERSION = '2.72.5'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1782,6 +1782,8 @@ async function applyMemberAction(store, body, ctx) {
     for (const provider of providers) {
       const id = text(provider?.provider ?? provider?.id)
       if (id.length === 0) continue
+      // 决策类 provider（Jev）返回概率/分数，不产出对话正文，不能分给团队子智能体。
+      if (id === 'jev-ai') continue
       try {
         const models = await llm.listModels(id)
         for (const model of models) {
@@ -2116,7 +2118,8 @@ export function apply(ctx, config) {
           try {
             const result = await dispatchToMember(ctx, parent, probeMember, '只回复两个字符：ok。不要解释，不要标点。', request.signal)
             const output = text(result.output).slice(0, 40)
-            const ok = result.stopReason === 'completed' && output.length > 0
+            // 只回 "ok" 的探测：决策类模型会把这句话当判断请求，输出里没有 ok，应按不可用处理。
+            const ok = result.stopReason === 'completed' && output.length > 0 && /ok/i.test(output)
             return json({ ok, provider, model, output, stopReason: result.stopReason, ms: Date.now() - started, error: ok ? '' : text(result.detail).slice(0, 300) })
           } catch (error) {
             return json({ ok: false, provider, model, ms: Date.now() - started, error: String(error && error.message ? error.message : error).slice(0, 300) })

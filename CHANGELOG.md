@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.72.5 — 2026-11-08
+
+- 自动分配与真实探测都排除决策类 provider（jev-ai）：它只返回概率/分数，不产出对话正文；
+- 真实推理探测要求输出里包含 ok，避免决策模型把「只回复 ok」当成判断请求后仍被判定为可用。
+
 ## 2.72.4 — 2026-11-08
 
 - 名册（agent_team_roster）的 department.subAgents 现在带 routes 数组（由 provider/model 生成），
