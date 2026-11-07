@@ -1084,6 +1084,8 @@ window.__ModuleLoader__.load({
           return sub.id === subId ? Object.assign({}, sub, { provider: provider, model: model }) : sub;
         });
         patchMember({ department: Object.assign({}, base, { subAgents: nextSubs }) });
+        // 立即落盘：只改下拉但不点保存时，以前会“选了又变回去”（看起来像无法选择）。
+        if (typeof props.onSubModel === "function") props.onSubModel(member, nextSubs);
       };
 
       var routes = member.routes || [];
@@ -1812,6 +1814,9 @@ window.__ModuleLoader__.load({
           },
           onSave: function (draft, done) { mutate("save", { action: "upsert", member: draft }, "已保存「" + draft.name + "」。", done); },
           onManageSubs: function (m) { setSubsOpen(m.id); },
+          onSubModel: function (m, subs) {
+            mutate("save", { action: "upsert", member: { id: m.id, department: { name: m.department.name, subAgents: subs } } }, "已更新「" + m.name + "」的子智能体模型。");
+          },
           isChief: snap.chiefId === member.id,
           onChief: function (m, make) { mutate("save", { action: make ? "chief" : "chief-clear", id: m.id }, make ? "「" + m.name + "」现在是总管。" : "已取消总管。"); },
           onDelete: function (m) {
