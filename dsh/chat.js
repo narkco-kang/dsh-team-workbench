@@ -161,6 +161,18 @@ function personaOf(member) {
     '按这个职责回答，不要自称通用助手。'
 }
 
+/**
+ * 去掉子智能体式的内部回执：有的路由会把提示词当「任务」，回一句
+ * 「已回复用户并同步给父智能体」或结尾加「（已同步给主智能体。）」，那不是给用户看的内容。
+ */
+export function stripReceipts(value) {
+  let out = text(value)
+  out = out.replace(/^\s*已(?:回复用户|同步|完成|处理)[^\n。]{0,30}[。\.]\s*/u, '')
+  out = out.replace(/[（(]\s*已(?:同步|回复|通知)[^）)]{0,40}[）)]\s*$/u, '')
+  out = out.replace(/^\s*[（(]\s*已(?:同步|回复|通知)[^）)]{0,40}[）)]\s*/u, '')
+  return out.replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function privatePrompt(member, messages, userText, memoryText) {
   return [
     '【私聊】你在和用户一对一对话。',
@@ -174,7 +186,8 @@ export function privatePrompt(member, messages, userText, memoryText) {
     '用户的新消息：',
     userText,
     '',
-    '请直接回复用户；保持你自己的角色与职责，不要代替其他成员发言。'
+    '请直接回复用户；保持你自己的角色与职责，不要代替其他成员发言。',
+    '只输出给用户看的内容：不要写「已回复用户」「已同步给父智能体」这类内部回执。'
   ].join('\n')
 }
 
@@ -270,7 +283,8 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
   const memoryText = await memoryBlock(slot, memory.persona, userText)
-  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal)
+  const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal)
+  const reply = { ...raw, text: stripReceipts(raw.text) }
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
   thread.updatedAt = new Date().toISOString()
   await saveChats(chats)
@@ -363,7 +377,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       const prompt = depth === 0 && admin !== undefined && member.id === admin.id
         ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
         : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
-      const reply = await runMember(ctx, parent, member, prompt, signal)
+      const raw = await runMember(ctx, parent, member, prompt, signal)
+      const reply = { ...raw, text: stripReceipts(raw.text) }
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
       target.updatedAt = new Date().toISOString()
