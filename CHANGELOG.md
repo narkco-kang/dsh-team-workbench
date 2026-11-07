@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.73.2 — 2026-11-08
+
+- 兜底路由改为跨服务商：deepseek 系成员兜底 minimax → glm → deepseek-flash，
+  非 deepseek 成员兜底 deepseek-flash → deepseek-v4-pro，避免同一家整体故障时兜底失效；
+- 部门主管补了 2 条跨服务商兜底（MiniMax / GLM），不再是单点。
+
 ## 2.73.1 — 2026-11-08
 
 - 名册里的子智能体 routes 现在与派发一致：主路由 + deepseek-flash / deepseek-v4-pro 两条兜底，
