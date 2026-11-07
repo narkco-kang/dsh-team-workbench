@@ -168,7 +168,7 @@ window.__ModuleLoader__.load({
     // DS-Bot 左侧栏原样搬过来（ds-bot/src/client/styles.js 的 SHELL_CSS）：
     // 变量、.bt-side、.bt-side-top、.bt-brand、.bt-round、.bt-list、.bt-row 及状态。
     var BT_CSS = [
-      ".dta-shell{--bt-ink:#141414;--bt-danger:#e02135;--bt-ink-2:rgba(20,20,20,.6);--bt-ink-3:rgba(20,20,20,.36);--bt-bubble:#eeeeee;--bt-sidebar:#f7f7f7;--bt-main:#fcfcfc;--bt-line:rgba(20,20,20,.08);--bt-line-2:rgba(20,20,20,.15);--bt-line-weak:rgba(20,20,20,.1);--bt-hover:rgba(119,119,119,.09);--bt-active:rgba(119,119,119,.17);--bt-card:#ffffff;--bt-accent:#4d6bfe;--bt-green:#00c972;--bt-star:#ff9800;--bt-user:#070707;--bt-user-ink:#fcfcfc;--bt-tag-bg:rgba(20,20,20,.06);--bt-tag-ink:rgba(20,20,20,.56);--bt-font:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);}",
+      ".dta-shell,.ats-root{--bt-ink:#141414;--bt-danger:#e02135;--bt-ink-2:rgba(20,20,20,.6);--bt-ink-3:rgba(20,20,20,.36);--bt-bubble:#eeeeee;--bt-sidebar:#f7f7f7;--bt-main:#fcfcfc;--bt-line:rgba(20,20,20,.08);--bt-line-2:rgba(20,20,20,.15);--bt-line-weak:rgba(20,20,20,.1);--bt-hover:rgba(119,119,119,.09);--bt-active:rgba(119,119,119,.17);--bt-card:#ffffff;--bt-accent:#4d6bfe;--bt-green:#00c972;--bt-star:#ff9800;--bt-user:#070707;--bt-user-ink:#fcfcfc;--bt-tag-bg:rgba(20,20,20,.06);--bt-tag-ink:rgba(20,20,20,.56);--bt-font:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);}",
       ".bt-side{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;gap:2px;padding:0 12px 8px 0;color:var(--bt-ink);font-family:var(--bt-font)}",
       ".bt-side-top{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:6px 5px 0 0}",
       ".bt-brand{display:inline-flex;align-items:center;gap:6px;margin-right:auto;padding:4px 8px 4px 4px;border:0;border-radius:8px;background:none;cursor:pointer;font-family:inherit;font-size:15px;line-height:20px;font-weight:600;letter-spacing:-.01em;color:var(--bt-ink);white-space:nowrap}",
@@ -288,8 +288,21 @@ window.__ModuleLoader__.load({
       ".ats-bubble-name{font-size:10.5px;opacity:.6;}",
       ".ats-bubble-text{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.55;padding:7px 10px;border-radius:10px;background:rgba(127,127,127,.12);}",
       ".ats-bubble.user .ats-bubble-text{background:var(--dsh-accent,#2563eb);color:#fff;}",
-      ".ats-compose{flex:0 0 auto;display:flex;gap:6px;align-items:flex-end;padding:8px 10px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.16));}",
-      ".ats-compose .ats-area{flex:1 1 auto;min-height:40px;resize:none;}",
+      /* 输入框照 DS-Bot / DSH 会话页：居中卡片、max-width 820、圆角 16、
+         文本 14/20，底部一行「＋ / 🎤 …… 发送」。 */
+      ".ats-compose{flex:0 0 auto;display:flex;justify-content:center;padding:10px 16px 14px;background:var(--bt-main);}",
+      ".ats-composer{display:flex;flex-direction:column;gap:6px;width:100%;max-width:820px;box-sizing:border-box;padding:10px 12px 8px;border:1px solid var(--bt-line-2);border-radius:16px;background:var(--bt-card);box-shadow:0 1px 2px rgba(0,0,0,.04);transition:border-color .12s ease,box-shadow .12s ease;}",
+      ".ats-composer:focus-within{border-color:var(--bt-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--bt-accent) 14%,transparent);}",
+      ".ats-composer .ats-area{width:100%;min-height:44px;max-height:200px;resize:none;padding:2px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:20px;color:var(--bt-ink);outline:none;box-shadow:none;}",
+      ".ats-composer .ats-area::placeholder{color:var(--bt-ink-3);}",
+      ".ats-composer .ats-area:disabled{opacity:.6;}",
+      ".ats-composer-bar{display:flex;align-items:center;gap:6px;}",
+      ".ats-round{width:32px;height:32px;flex:0 0 auto;border-radius:50%;border:1px solid var(--bt-line);background:transparent;color:var(--bt-ink);font:inherit;font-size:16px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}",
+      ".ats-round:hover{background:var(--bt-hover);}",
+      ".ats-round.recording{color:#dc2626;border-color:rgba(220,38,38,.5);}",
+      ".ats-send{height:32px;padding:0 16px;border-radius:999px;border:0;background:var(--bt-accent);color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}",
+      ".ats-send:hover{filter:brightness(1.05);}",
+      ".ats-send:disabled{background:var(--bt-active);color:var(--bt-ink-3);cursor:default;filter:none;}",
       ".ats-check-list{display:flex;flex-wrap:wrap;gap:6px 12px;max-height:120px;overflow:auto;margin:6px 0;}",
       ".ats-mascot .ats-mascot-bob{animation:ats-bob 3.8s ease-in-out infinite;transform-origin:50% 60%;}",
       ".ats-mascot.working .ats-mascot-bob{animation-duration:1.1s;}",
@@ -1726,18 +1739,28 @@ window.__ModuleLoader__.load({
                 })
           ),
           h("div", { className: "ats-compose" },
-            h("button", { className: "ats-btn", type: "button", title: "新建群聊", onClick: openForm }, "＋"),
-            h("textarea", {
-              className: "ats-area", rows: 2, value: draft,
-              placeholder: target === null
-                ? "先选一个成员或群聊，再输入消息"
-                : currentRoom ? "在群里发言；@成员名 可直接点名（Enter 发送）" : "发消息给 " + title + "（Enter 发送，Shift+Enter 换行）",
-              disabled: busy || target === null,
-              onChange: function (e) { setDraft(e.target.value); },
-              onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
-            }),
-            h("button", { className: "ats-btn" + (micOn ? " recording" : ""), type: "button", title: "语音输入（中文）", disabled: target === null, onClick: toggleVoice }, micOn ? "● 聆听中" : "🎤"),
-            h("button", { className: "ats-btn primary", type: "button", disabled: busy || target === null || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
+            h("div", { className: "ats-composer" },
+              h("textarea", {
+                className: "ats-area", rows: 1, value: draft,
+                placeholder: target === null
+                  ? "先选一个成员或群聊，再输入消息"
+                  : currentRoom ? "在群里发言；@成员名 可直接点名（Enter 发送）" : "发消息给 " + title + "（Enter 发送，Shift+Enter 换行）",
+                disabled: busy || target === null,
+                onChange: function (e) { setDraft(e.target.value); },
+                onInput: function (e) {
+                  var el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(200, Math.max(44, el.scrollHeight)) + "px";
+                },
+                onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+              }),
+              h("div", { className: "ats-composer-bar" },
+                h("button", { className: "ats-round", type: "button", title: "新建群聊", "aria-label": "新建群聊", onClick: openForm }, "＋"),
+                h("button", { className: "ats-round" + (micOn ? " recording" : ""), type: "button", title: "语音输入（中文）", "aria-label": "语音输入", disabled: target === null, onClick: toggleVoice }, micOn ? "●" : "🎤"),
+                h("span", { className: "ats-spacer" }),
+                h("button", { className: "ats-send", type: "button", disabled: busy || target === null || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
+              )
+            )
           )
         ),
         form !== null
