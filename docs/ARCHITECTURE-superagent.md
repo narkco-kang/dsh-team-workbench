@@ -17,6 +17,11 @@
 | Subscription | 群成员即订阅者：群消息 fan-out 给成员；私聊只给该成员 | ✅（简化） |
 | Policy | `policy.json`，带版本号；工单记录受理时的版本，策略变更只影响之后开的新单 | ✅ 2.79.0 |
 | Report | 成员结果回写工单，会话里显示最终答复 | ✅ |
+| 幂等（Trigger 只受理一次） | 客户端带 `clientMessageId`，同一 id 重复到达只产生一张工单 | ✅ |
+| 续单（人消息恢复已结束工单） | 同一 Thread 的新消息优先并入 open 单；已结束且未被叫停的单直接恢复，用原 Mandate | ✅ |
+| 叫停（撤回 Mandate） | `停止/取消` 关闭该 Thread 未结束工单并标记 `stoppedByPerson`，之后不再恢复 | ✅ |
+| 策略变更送达活单 | `savePolicy` 给 open 工单打 `policyNotice`，不撤销 Mandate | ✅ |
+| 中断恢复 | 启动时把 running 的 assignment 标为 interrupted，下一次消息续上 | ✅ |
 
 ## 与它的差异（刻意保留）
 

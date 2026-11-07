@@ -46,7 +46,7 @@ import {
   slotOf
 } from './memory.js'
 import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
-import { addAssignment, endTicket, evaluate, finishAssignment, listTickets, loadPolicy, openTicket, savePolicy, stopThread } from './tickets.js'
+import { addAssignment, endTicket, evaluate, finishAssignment, listTickets, loadPolicy, markInterrupted, openTicket, savePolicy, stopThread } from './tickets.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const MERGE_ROUTE = ROUTE_BASE + '/chats/merge'
@@ -924,7 +924,9 @@ export function apply(ctx) {
         return json({ ok: false, error: '已停止该会话未结束的工单' }, 409)
       }
       if (verdict.verdict !== 'accept') return json({ ok: false, error: verdict.reason || '评估未通过' }, 409)
-      const ticket = await openTicket({ threadKind: 'private', threadId: member.id, actor: 'user', text: userText })
+      const opened = await openTicket({ threadKind: 'private', threadId: member.id, actor: 'user', text: userText, clientMessageId: text(body.clientMessageId) })
+      if (opened.duplicate) return json({ ok: false, error: '重复消息已忽略' }, 409)
+      const ticket = opened.ticket
       busy.add(key)
       setSteerTarget(key)
       try {
@@ -971,7 +973,13 @@ export function apply(ctx) {
       return json({ ok: false, error: '已停止该群 ' + String(stopped) + ' 张未结束的工单' }, 409)
     }
     if (verdict.verdict !== 'accept') return json({ ok: false, error: verdict.reason || '评估未通过' }, 409)
-    const ticket = await openTicket({ threadKind: 'group', threadId: room.id, actor: 'user', text: userText })
+    const opened = await openTicket({
+      threadKind: 'group', threadId: room.id, actor: 'user', text: userText,
+      clientMessageId: text(body.clientMessageId),
+      subscriptions: Array.isArray(room.memberIds) ? room.memberIds : []
+    })
+    if (opened.duplicate) return json({ ok: false, error: '重复消息已忽略' }, 409)
+    const ticket = opened.ticket
     busy.add(key)
     setSteerTarget(key)
     try {
@@ -1678,6 +1686,9 @@ function registerChatTools(ctx) {
     }
   }, 30000)
   if (typeof timer.unref === 'function') timer.unref()
+
+  // 冷启动：上次进程里还在跑的 assignment 标成 interrupted，等下一次消息续上。
+  markInterrupted().catch((error) => console.warn('[team-workbench] 恢复工单失败：' + String(error)))
 
   const disposers = [...extraDisposers, ctx.tools.register(chat), ctx.tools.register(groupChat), ctx.tools.register(groupCreate)]
   return () => {

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.79.1 — 2026-11-08
+
+把工单域补到「真正可用」：
+- 幂等：clientMessageId 重复只受理一次；
+- 续单：同 Thread 新消息并入 open 单，已结束的按原 Mandate 恢复（用户叫停的不恢复）；
+- 叫停：停止/取消 打 stoppedByPerson；
+- 策略变更送达活单（policyNotice），不撤销 Mandate；
+- 启动时把 running 的 assignment 标为 interrupted；
+- 新增 test/tickets.test.mjs（11 项）。
+
 ## 2.79.0 — 2026-11-08
 
 补齐 superagent 的工单域：

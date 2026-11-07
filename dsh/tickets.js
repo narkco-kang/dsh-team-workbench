@@ -54,6 +54,15 @@ export async function savePolicy(patch) {
   }
   await mkdir(dir(), { recursive: true })
   await writeFile(policyPath(), JSON.stringify(next, null, 2), 'utf8')
+  // 策略变更送达活着的工单：不撤销 Mandate，只让执行方知道规则变了。
+  const list = await loadTickets()
+  let touched = 0
+  for (const ticket of list) {
+    if (ticket.status !== 'open') continue
+    ticket.policyNotice = next.version
+    touched += 1
+  }
+  if (touched > 0) await saveTickets(list)
   return next
 }
 
@@ -79,7 +88,7 @@ export async function evaluate(input) {
   const policy = await loadPolicy()
   const body = text(input.text).trim()
   if (policy.enabled === false) return { verdict: 'unavailable', reason: '策略已停用工单' }
-  if (/^(停止|取消|别做了|stop)\b/i.test(body)) return { verdict: 'stop', reason: '用户要求停止' }
+  if (/^(停止|取消|别做了|stop)(?:$|[\s，。!！、])/i.test(body)) return { verdict: 'stop', reason: '用户要求停止' }
   const allowed = Array.isArray(policy.allowThreads) ? policy.allowThreads : []
   if (allowed.length > 0 && !allowed.includes(String(input.threadId))) {
     return { verdict: 'ignore', reason: '该会话不在策略白名单内' }
@@ -87,9 +96,40 @@ export async function evaluate(input) {
   return { verdict: 'accept', reason: '' }
 }
 
-/** 受理：开一张工单，Mandate 记下授权来源与所用策略版本。 */
+/**
+ * 受理：先做幂等与续单。
+ * - 同一个 clientMessageId 重复到达 → 同一张工单（Trigger 幂等）；
+ * - 该 Thread 还有 open 工单 → 消息并入（幂等 attach）；
+ * - 该 Thread 的工单已结束且不是用户叫停 → 用同一 Mandate 恢复（不重新评估）；
+ * - 否则新开一张。
+ */
 export async function openTicket(input) {
   const policy = await loadPolicy()
+  const list = await loadTickets()
+  const clientMessageId = text(input.clientMessageId)
+  if (clientMessageId.length > 0) {
+    const seen = list.find((entry) => entry.clientMessageId === clientMessageId)
+    if (seen !== undefined) return { ticket: seen, duplicate: true, resumed: false, attached: false }
+  }
+  const sameThread = list.filter((entry) => entry.threadKind === (input.threadKind === 'private' ? 'private' : 'group') && entry.threadId === text(input.threadId))
+  const openOne = sameThread.filter((entry) => entry.status === 'open').slice(-1)[0]
+  if (openOne !== undefined) {
+    openOne.inputs = Array.isArray(openOne.inputs) ? openOne.inputs : []
+    openOne.inputs.push({ at: new Date().toISOString(), text: text(input.text).slice(0, 2000), actor: text(input.actor) || 'user' })
+    await saveTickets(list)
+    return { ticket: openOne, duplicate: false, resumed: false, attached: true }
+  }
+  const endedOne = sameThread.filter((entry) => entry.status === 'ended' && entry.stoppedByPerson !== true).slice(-1)[0]
+  if (endedOne !== undefined) {
+    endedOne.status = 'open'
+    endedOne.endedAt = ''
+    endedOne.report = ''
+    endedOne.inputs = Array.isArray(endedOne.inputs) ? endedOne.inputs : []
+    endedOne.inputs.push({ at: new Date().toISOString(), text: text(input.text).slice(0, 2000), actor: text(input.actor) || 'user' })
+    endedOne.resumedAt = new Date().toISOString()
+    await saveTickets(list)
+    return { ticket: endedOne, duplicate: false, resumed: true, attached: false }
+  }
   const ticket = {
     id: makeId('tkt'),
     threadKind: input.threadKind === 'private' ? 'private' : 'group',
@@ -104,14 +144,35 @@ export async function openTicket(input) {
       at: new Date().toISOString()
     },
     assignments: [],
+    inputs: [{ at: new Date().toISOString(), text: text(input.text).slice(0, 2000), actor: text(input.actor) || 'user' }],
+    subscriptions: Array.isArray(input.subscriptions) ? input.subscriptions : [],
+    clientMessageId,
+    stoppedByPerson: false,
+    policyNotice: 0,
     report: '',
     createdAt: new Date().toISOString(),
     endedAt: ''
   }
-  const list = await loadTickets()
   list.push(ticket)
   await saveTickets(list)
-  return ticket
+  return { ticket, duplicate: false, resumed: false, attached: false }
+}
+
+/** 重启恢复：running 的执行标记为 interrupted，等下一次消息续上。 */
+export async function markInterrupted() {
+  const list = await loadTickets()
+  let count = 0
+  for (const ticket of list) {
+    for (const assignment of ticket.assignments) {
+      if (assignment.status !== 'running') continue
+      assignment.status = 'interrupted'
+      assignment.endedAt = new Date().toISOString()
+      assignment.note = '进程重启时中断'
+      count += 1
+    }
+  }
+  if (count > 0) await saveTickets(list)
+  return count
 }
 
 export async function addAssignment(ticketId, memberId, label) {
@@ -156,6 +217,7 @@ export async function stopThread(threadKind, threadId) {
     if (ticket.threadKind !== threadKind || ticket.threadId !== String(threadId)) continue
     ticket.status = 'ended'
     ticket.report = '用户要求停止'
+    ticket.stoppedByPerson = true
     ticket.endedAt = new Date().toISOString()
     count += 1
   }
