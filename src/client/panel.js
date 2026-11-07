@@ -190,6 +190,7 @@ window.__ModuleLoader__.load({
       ".bt-row-body{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}",
       ".bt-row-name{display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;line-height:20px;font-weight:400}",
       ".bt-row-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+      ".bt-tag.chief{background:color-mix(in srgb,var(--bt-accent) 16%,transparent);color:var(--bt-accent);}",
       ".bt-tag{flex:none;max-width:96px;font-size:12px;line-height:16px;font-weight:400;padding:1px 6px;border-radius:4px;background:var(--bt-tag-bg);color:var(--bt-tag-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
       ".bt-row-preview{font-size:13px;line-height:18px;color:var(--bt-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
       ".bt-unread{width:8px;height:8px;border-radius:50%;background:var(--bt-accent);flex:none;margin-right:2px;animation:bt-fade .13s cubic-bezier(.22,1,.36,1)}",
@@ -218,6 +219,8 @@ window.__ModuleLoader__.load({
       ".ats-group-count{font-size:10px;opacity:.55;padding:0 5px;border-radius:999px;background:rgba(127,127,127,.16);}",
       ".ats-group-chip{font-size:10px;padding:1px 7px;border-radius:999px;white-space:nowrap;flex:0 0 auto;}",
       ".ats-group-chip.muted{background:rgba(127,127,127,.12);opacity:.6;}",
+      ".ats-card.chief{box-shadow:inset 0 0 0 1.5px var(--bt-accent,#4d6bfe);}",
+      ".ats-tag.chief{background:color-mix(in srgb,var(--bt-accent,#4d6bfe) 16%,transparent);color:var(--bt-accent,#4d6bfe);}",
       ".ats-avatar{width:38px;height:38px;}",
       ".ats-id{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto;}",
       ".ats-name-line{display:flex;align-items:center;gap:5px;min-width:0;}",
@@ -746,7 +749,7 @@ window.__ModuleLoader__.load({
       );
 
       return h("div", {
-        className: "ats-card" + (member.enabled ? "" : " off") + (props.selected ? " sel" : "") + (editing ? " editing" : ""),
+        className: "ats-card" + (member.enabled ? "" : " off") + (props.selected ? " sel" : "") + (props.isChief ? " chief" : "") + (editing ? " editing" : ""),
         style: { borderLeftColor: accent, background: tint(accent, 0.06) }
       },
         h("div", { className: "ats-card-head" },
@@ -758,6 +761,7 @@ window.__ModuleLoader__.load({
           h("div", { className: "ats-id" },
             h("div", { className: "ats-name-line" },
               h("span", { className: "ats-name" }, member.name),
+              props.isChief ? h("span", { className: "ats-tag chief" }, "总管") : null,
               member.enabled ? null : h("span", { className: "ats-tag" }, "停用"),
               member.roleRef && member.roleRef.id ? h("span", { className: "ats-tag", title: member.roleRef.id }, "角色库") : null
             ),
@@ -778,6 +782,11 @@ window.__ModuleLoader__.load({
         ),
         h("div", { className: "ats-actions" },
           h("button", { className: "ats-btn" + (editing ? " primary" : ""), type: "button", onClick: function () { setEditing(!editing); } }, editing ? "收起" : "编辑"),
+          h("button", {
+            className: "ats-btn" + (props.isChief ? " primary" : ""), type: "button", disabled: busy,
+            title: props.isChief ? "取消总管" : "把这一位设为团队总管",
+            onClick: function () { if (props.onChief) props.onChief(member, props.isChief !== true); }
+          }, props.isChief ? "取消总管" : "设为总管"),
           h("button", { className: "ats-btn", type: "button", onClick: function () { if (props.onChat) props.onChat(member.id); } }, "聊天"),
           h("button", { className: "ats-btn", type: "button", disabled: busy, onClick: function () { props.onDuplicate(member); } }, "复制"),
           h("button", {
@@ -951,7 +960,7 @@ window.__ModuleLoader__.load({
       var scope = props.scope || {};
       var sessionId = resolveSessionId(scope);
 
-      var state = useState({ loading: true, error: "", members: [], groups: [], presets: [], preset: "", roleLibrary: null, catalog: [], defaults: EMPTY_DEFAULTS, effortOptions: [], limits: null, storePath: "", pluginVersion: "" });
+      var state = useState({ loading: true, error: "", members: [], chiefId: "", groups: [], presets: [], preset: "", roleLibrary: null, catalog: [], defaults: EMPTY_DEFAULTS, effortOptions: [], limits: null, storePath: "", pluginVersion: "" });
       var snap = state[0];
       var setSnap = state[1];
       var busyState = useState("");
@@ -992,6 +1001,7 @@ window.__ModuleLoader__.load({
             loading: false,
             error: data.catalogError ? String(data.catalogError) : "",
             members: Array.isArray(data.members) ? data.members : [],
+            chiefId: typeof data.chiefId === "string" ? data.chiefId : "",
             groups: Array.isArray(data.groups) ? data.groups : [],
             presets: Array.isArray(data.presets) ? data.presets : [],
             preset: typeof data.preset === "string" ? data.preset : "",
@@ -1026,6 +1036,7 @@ window.__ModuleLoader__.load({
           return Object.assign({}, prev, {
             loading: false,
             members: Array.isArray(data.members) ? data.members : [],
+            chiefId: typeof data.chiefId === "string" ? data.chiefId : prev.chiefId,
             groups: Array.isArray(data.groups) ? data.groups : prev.groups,
             preset: typeof data.preset === "string" ? data.preset : prev.preset,
             presets: Array.isArray(data.presets) ? data.presets : prev.presets,
@@ -1139,6 +1150,8 @@ window.__ModuleLoader__.load({
             setSelected(function (prev) { var next = Object.assign({}, prev); if (next[id]) delete next[id]; else next[id] = true; return next; });
           },
           onSave: function (draft, done) { mutate("save", { action: "upsert", member: draft }, "已保存「" + draft.name + "」。", done); },
+          isChief: snap.chiefId === member.id,
+          onChief: function (m, make) { mutate("save", { action: make ? "chief" : "chief-clear", id: m.id }, make ? "「" + m.name + "」现在是总管。" : "已取消总管。"); },
           onDelete: function (m) { mutate("save", { action: "delete", id: m.id }, "已删除「" + m.name + "」。"); },
           onDuplicate: function (m) { mutate("save", { action: "duplicate", id: m.id }, "已复制「" + m.name + "」。"); },
           onDispatch: dispatch,
@@ -1210,13 +1223,18 @@ window.__ModuleLoader__.load({
           h("div", { style: { minWidth: 0 } },
             h("div", { className: "ats-hero-title" }, "智能体团队"),
             h("div", { className: "ats-hero-sub" },
-              String(members.length) + " 名成员 · " + String(groups.length) + " 个分组 · " +
-              String(routeTotal) + " 条模型路由 · " + String(bound) + " 名已配置模型" +
+              (function () {
+                var chief = members.filter(function (m) { return m.id === snap.chiefId; })[0];
+                return (chief ? "总管 " + chief.name + " · " : "未指定总管 · ") +
+                  String(members.length) + " 名成员 · " + String(groups.length) + " 个分组 · " +
+                  String(routeTotal) + " 条模型路由 · " + String(bound) + " 名已配置模型";
+              })() +
               (snap.pluginVersion ? " · v" + snap.pluginVersion : ""))
           ),
           h("span", { className: "ats-spacer" }),
           h("button", { className: "ats-btn", type: "button", disabled: busy === "save", onClick: load }, "刷新"),
           h("button", { className: "ats-btn", type: "button", disabled: busy === "preset", onClick: function () { setPresetOpen(!presetOpen); } }, "项目部预设"),
+          h("button", { className: "ats-btn", type: "button", disabled: busy === "save", onClick: function () { mutate("save", { action: "chief-create" }, "已新建一位总管。"); } }, "＋ 总管"),
           h("button", { className: "ats-btn primary", type: "button", disabled: busy === "save", onClick: createOne }, "＋ 新建")
         ),
 
@@ -1443,6 +1461,9 @@ window.__ModuleLoader__.load({
       var dataState = useState({ loading: true, error: "", private: [], rooms: [] });
       var data = dataState[0];
       var setData = dataState[1];
+      var chiefState = useState("");
+      var chiefId = chiefState[0];
+      var setChiefId = chiefState[1];
       var targetState = useState(initialRoom.length > 0 ? { kind: "group", id: initialRoom } : initial.length > 0 ? { kind: "private", id: initial } : readLastChat());
       var target = targetState[0];
       var setTarget = targetState[1];
@@ -1521,6 +1542,13 @@ window.__ModuleLoader__.load({
 
       useEffect(function () { loadOverview(); }, [loadOverview]);
 
+      // 总管：侧栏置顶显示，建群时默认当管理员。
+      useEffect(function () {
+        fetch("/api/team-workbench/state", { cache: "no-store" }).then(function (res) { return res.json(); }).then(function (payload) {
+          setChiefId(typeof payload.chiefId === "string" ? payload.chiefId : "");
+        }).catch(function () { /* 总管可选 */ });
+      }, []);
+
       // DS-Bot 的聊天页永远停在一个可输入的会话上：载入后若还没选中，就落到
       // 上次的会话，其次第一个群，最后第一个成员——否则右侧只有一句空提示，
       // 整个页面连输入框都没有。
@@ -1576,7 +1604,8 @@ window.__ModuleLoader__.load({
 
       var openForm = function () {
         var members = data.private || [];
-        setForm({ name: "", adminId: members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1 });
+        var chiefMember = members.filter(function (m) { return m.memberId === chiefId; })[0];
+        setForm({ name: "", adminId: chiefMember ? chiefMember.memberId : members[0] ? members[0].memberId : "", memberIds: members.slice(0, 3).map(function (m) { return m.memberId; }), responder: "lead", relayDepth: 1 });
       };
       var submitForm = function () {
         if (form === null) return;
@@ -1623,9 +1652,9 @@ window.__ModuleLoader__.load({
       };
       var stampOf = function (entry) { return Number(entry && entry.updatedAt) || 0; };
       // DS-Bot 的列表是「群 + 人」一条流，按最近动静排（没有置顶时不分组）。
-      var rows = rooms.map(function (room) { return { kind: "room", item: room, at: stampOf(room) }; })
-        .concat(members.map(function (member) { return { kind: "member", item: member, at: stampOf(member) }; }))
-        .sort(function (a, b) { return b.at - a.at; });
+      var rows = rooms.map(function (room) { return { kind: "room", item: room, at: stampOf(room), chief: false }; })
+        .concat(members.map(function (member) { return { kind: "member", item: member, at: stampOf(member), chief: member.memberId === chiefId }; }))
+        .sort(function (a, b) { return Number(b.chief) - Number(a.chief) || b.at - a.at; });
 
       var memberRow = function (m) {
         var on = target !== null && target.kind === "private" && target.id === m.memberId;
@@ -1641,6 +1670,7 @@ window.__ModuleLoader__.load({
           h("span", { className: "bt-row-body" },
             h("span", { className: "bt-row-name" },
               h("span", { className: "bt-row-title" }, m.name),
+              m.memberId === chiefId ? h("span", { className: "bt-tag chief", title: "总管" }, "★ 总管") : null,
               m.role ? h("span", { className: "bt-tag", title: m.role }, m.role) : null
             ),
             h("span", { className: "bt-row-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")

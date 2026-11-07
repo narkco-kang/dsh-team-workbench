@@ -36,7 +36,8 @@ const state = {
   defaults: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: '' },
   effortOptions: ['minimal', 'low', 'medium', 'high', 'max'],
   limits: { maxMembers: 64, maxRoutes: 8, maxGroups: 24 },
-  storePath: '/Users/wenkangzhong/Library/Application Support/dsh-desktop/harness/agent-team-studio/team.json'
+  storePath: '/Users/wenkangzhong/Library/Application Support/dsh-desktop/harness/agent-team-studio/team.json',
+  chiefId: members[0].id
 }
 
 const rolesPayload = {

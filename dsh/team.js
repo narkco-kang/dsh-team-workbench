@@ -57,7 +57,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.6.6'
+const PLUGIN_VERSION = '2.7.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -222,7 +222,7 @@ function normalizeMember(raw, index) {
 
 /** 空团队。 */
 function emptyStore() {
-  return { version: STORE_VERSION, updatedAt: '', preset: '', groups: [], members: [] }
+  return { version: STORE_VERSION, updatedAt: '', preset: '', chiefId: '', groups: [], members: [] }
 }
 
 /** 读取团队配置；缺失或损坏时返回空团队。 */
@@ -235,10 +235,13 @@ export async function loadStore() {
     for (const member of members) {
       if (member.groupId.length > 0 && !known.has(member.groupId)) member.groupId = ''
     }
+    const chiefId = text(parsed?.chiefId)
     return {
       version: STORE_VERSION,
       updatedAt: text(parsed?.updatedAt),
       preset: text(parsed?.preset),
+      // 总管：团队里唯一的协调者；被删或失配时自动清空，不会留下悬空 id。
+      chiefId: members.some((member) => member.id === chiefId) ? chiefId : '',
       groups,
       members
     }
@@ -261,6 +264,7 @@ async function saveStore(store) {
     version: STORE_VERSION,
     updatedAt: new Date().toISOString(),
     preset: store.preset,
+    chiefId: store.chiefId || '',
     groups: store.groups,
     members: store.members
   }, null, 2)
@@ -680,6 +684,7 @@ function registerTools(ctx) {
         properties: {
           count: { type: 'integer', description: '当前团队成员数。' },
           pluginVersion: { type: 'string' },
+          chiefId: { type: 'string', description: '总管成员 id；空串表示还没指定总管。' },
           groups: { type: 'array', description: '团队分组（顺序即展示顺序）。', items: GROUP_SCHEMA },
           members: { type: 'array', items: MEMBER_SCHEMA }
         }
@@ -687,12 +692,12 @@ function registerTools(ctx) {
       render: (_args, value) => [{
         type: 'text',
         text: '智能体团队共 ' + String(value.count) + ' 名成员：\n' +
-          value.members.map((m, i) => memberLine(m, i)).join('\n')
+          value.members.map((m, i) => (m.id === value.chiefId ? '★ ' : '') + memberLine(m, i)).join('\n')
       }]
     },
     async execute() {
       const store = await loadStore()
-      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, groups: store.groups, members: store.members }
+      return { count: store.members.length, pluginVersion: PLUGIN_VERSION, chiefId: store.chiefId || '', groups: store.groups, members: store.members }
     }
   }
 
@@ -1271,10 +1276,38 @@ function applyMemberAction(store, body) {
     return null
   }
 
+  if (action === 'chief-create') {
+    if (store.members.length >= MAX_MEMBERS) return '团队最多 ' + String(MAX_MEMBERS) + ' 名成员'
+    const taken = new Set(store.members.map((m) => m.name))
+    const member = normalizeMember({
+      name: uniqueName('总管', taken),
+      role: '团队总管：拆解目标、分派任务、汇总交付',
+      emoji: '🧭',
+      color: '#4d6bfe'
+    }, store.members.length)
+    store.members.push(member)
+    store.chiefId = member.id
+    return null
+  }
+
+  if (action === 'chief') {
+    const id = text(body.id)
+    if (id.length === 0) return '缺少要设为总管的成员 id'
+    if (!store.members.some((m) => m.id === id)) return '找不到该成员'
+    store.chiefId = id
+    return null
+  }
+
+  if (action === 'chief-clear') {
+    store.chiefId = ''
+    return null
+  }
+
   if (action === 'delete') {
     const id = text(body.id)
     const before = store.members.length
     store.members = store.members.filter((m) => m.id !== id)
+    if (store.chiefId === id) store.chiefId = ''
     return store.members.length === before ? '找不到该成员' : null
   }
 
@@ -1284,6 +1317,7 @@ function applyMemberAction(store, body) {
     const drop = new Set(ids)
     const before = store.members.length
     store.members = store.members.filter((m) => !drop.has(m.id))
+    if (drop.has(store.chiefId)) store.chiefId = ''
     return before === store.members.length ? '没有成员被删除（id 不存在）' : null
   }
 
@@ -1454,6 +1488,7 @@ export function apply(ctx, config) {
       pluginVersion: PLUGIN_VERSION,
       version: STORE_VERSION,
       members: store.members,
+      chiefId: store.chiefId || '',
       groups: store.groups,
       preset: store.preset,
       presets: await listPresets(),
