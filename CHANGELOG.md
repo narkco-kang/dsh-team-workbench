@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2.10.0 — 2026-11-07
+
+- 记忆改成 L0–L3 分层（参考 TencentCloud/TencentDB-Agent-Memory 的分层与渐进披露思路）：
+  L0 原始对话（chats.json）、L1 原子事实（带 key / 重要度 / 来源消息）、L2 场景摘要、L3 用户画像；
+- L1 同 key 覆盖、同文本去重、上限 40 条按分数淘汰；L3 画像跨会话共享、去重、上限 12 条；
+- 召回改成渐进披露：提示词只放「画像 + 场景 + 按当前消息打分的前 6 条事实」，不再全量注入；
+- 记忆面板分层展示「L3 画像 / L2 场景 / L1 原子事实」，可删画像、删事实、手动记一条、清空；
+- 旧 memory.json（summary + facts）自动升级到 v2；
+- 修复 test/dispatch-compat.test.mjs 在临时目录缺 balance.js 的加载失败。
+
 ## 2.9.0 — 2026-11-07
 
 - 长期记忆：每条会话（私聊 / 群聊 / 总管台）多一份 summary + facts，存 memory.json；

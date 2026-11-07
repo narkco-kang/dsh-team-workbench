@@ -46,6 +46,12 @@ ok('R4 receipt 兼容 childId', source.includes("typeof run.childId === 'string'
 
 // ── 用临时副本导出内部函数（不改仓库实现）─────────────────────────────────
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-dispatch-compat-'))
+// team.js 还静态 import 了同目录的 balance.js 等模块；只复制 team.js 会在临时目录里
+// 找不到它们（ERR_MODULE_NOT_FOUND）。这里把 dsh/ 下的 .js 全复制一份，副本与仓库逐字节相同。
+const sourceDir = path.resolve(HERE, '../dsh')
+for (const name of fs.readdirSync(sourceDir)) {
+  if (name.endsWith('.js')) fs.copyFileSync(path.join(sourceDir, name), path.join(tmpDir, name))
+}
 const tmpFile = path.join(tmpDir, 'team-exported.mjs')
 fs.writeFileSync(tmpFile, source + '\nexport { startChild, runOnRoute };\n')
 

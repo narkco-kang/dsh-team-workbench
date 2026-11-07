@@ -23,7 +23,7 @@ import {
   readJson,
   text
 } from './team.js'
-import { addFact, compactIfNeeded, loadMemory, memoryBlock, removeFact, saveMemory, slotOf } from './memory.js'
+import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, removeAtom, removePersona, saveMemory, slotOf } from './memory.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -240,7 +240,7 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   pushMessage(thread.messages, messageOf('user', null, userText))
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
-  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryBlock(slot)), signal)
+  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryBlock(slot, memory.persona, userText)), signal)
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
   thread.updatedAt = new Date().toISOString()
   await saveChats(chats)
@@ -329,7 +329,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       if (used.has(member.id)) continue
       used.add(member.id)
       if (turns.length >= MAX_TURNS_PER_MESSAGE) break
-      const memoryText = memoryBlock(slotOf(memory, 'room', target.id))
+      const memoryText = memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
       const prompt = depth === 0 && admin !== undefined && member.id === admin.id
         ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
         : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
@@ -616,8 +616,20 @@ export function apply(ctx) {
           const kind = url.searchParams.get('kind') === 'room' ? 'room' : 'private'
           const id = url.searchParams.get('id') || ''
           const memory = await loadMemory()
-          if (id.length === 0) return json({ ok: true, private: memory.private, rooms: memory.rooms })
-          return json({ ok: true, kind, id, memory: slotOf(memory, kind, id) })
+          if (id.length === 0) return json({ ok: true, persona: memory.persona, private: memory.private, rooms: memory.rooms })
+          const slot = slotOf(memory, kind, id)
+          // 兼容旧的 summary/facts 字段名，同时给出分层的 l2/atoms 与画像。
+          return json({
+            ok: true, kind, id, persona: memory.persona,
+            memory: {
+              summary: slot.l2.summary,
+              facts: slot.atoms.map((atom) => ({ id: atom.id, text: atom.text, at: atom.at, importance: atom.importance, key: atom.key })),
+              l2: slot.l2,
+              atoms: slot.atoms,
+              since: slot.since,
+              updatedAt: slot.updatedAt
+            }
+          })
         }
         const body = await readJson(request)
         if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
@@ -628,21 +640,25 @@ export function apply(ctx) {
         const slot = slotOf(memory, kind, id)
         const action = text(body.action) || 'remember'
         if (action === 'forget-fact') {
-          if (!removeFact(slot, text(body.factId))) return json({ ok: false, error: '找不到这条事实' }, 404)
+          if (!removeAtom(slot, text(body.factId))) return json({ ok: false, error: '找不到这条事实' }, 404)
+        } else if (action === 'forget-persona') {
+          if (!removePersona(memory.persona, text(body.factId))) return json({ ok: false, error: '找不到这条画像' }, 404)
+          memory.persona.updatedAt = new Date().toISOString()
         } else if (action === 'clear') {
-          slot.summary = ''
-          slot.facts = []
+          slot.l2 = { summary: '', at: '' }
+          slot.atoms = []
           slot.since = 0
         } else if (action === 'remember') {
           const fact = text(body.text).trim()
           if (fact.length === 0) return json({ ok: false, error: '事实不能为空' }, 400)
-          addFact(slot, fact)
+          addAtom(slot, { text: fact, key: text(body.key), importance: Number(body.importance) || 3 })
+          if (body.persona === true) addPersona(memory.persona, fact)
         } else {
           return json({ ok: false, error: '未知的 action' }, 400)
         }
         slot.updatedAt = new Date().toISOString()
         await saveMemory(memory)
-        return json({ ok: true, kind, id, memory: slot })
+        return json({ ok: true, kind, id, persona: memory.persona, memory: { summary: slot.l2.summary, facts: slot.atoms, l2: slot.l2, atoms: slot.atoms, since: slot.since, updatedAt: slot.updatedAt } })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }
