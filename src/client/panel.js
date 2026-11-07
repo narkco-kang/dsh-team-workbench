@@ -395,6 +395,15 @@ window.__ModuleLoader__.load({
     function fetchMemory(kind, id) {
       return fetch("/api/team-workbench/memory?kind=" + encodeURIComponent(kind) + "&id=" + encodeURIComponent(id), { cache: "no-store" }).then(unwrap);
     }
+    /** 查询麦克风权限状态：granted / prompt / denied / unknown。 */
+    function checkMicPermission() {
+      if (typeof navigator === "undefined" || !navigator.permissions || !navigator.permissions.query) return Promise.resolve("unknown");
+      try {
+        return navigator.permissions.query({ name: "microphone" }).then(function (status) { return status.state; }).catch(function () { return "unknown"; });
+      } catch (error) {
+        return Promise.resolve("unknown");
+      }
+    }
     /** 本地 STT（jianchang512/stt）设置与转写。 */
     function fetchSttSettings(probe) {
       return fetch("/api/team-workbench/stt" + (probe ? "?probe=1" : ""), { cache: "no-store" }).then(unwrap);
@@ -1576,6 +1585,12 @@ window.__ModuleLoader__.load({
       var recLevelState = useState(0);
       var recLevel = recLevelState[0];
       var setRecLevel = recLevelState[1];
+      var micPermState = useState("unknown");
+      var micPerm = micPermState[0];
+      var setMicPerm = micPermState[1];
+      useEffect(function () {
+        checkMicPermission().then(setMicPerm);
+      }, []);
       var audioCtxRef = React.useRef(null);
       var levelTimerRef = React.useRef(null);
       var maxRmsRef = React.useRef(0);
@@ -1668,18 +1683,7 @@ window.__ModuleLoader__.load({
       };
 
       // 本地 STT：录一段 webm → POST /stt → 本地 faster-whisper 转写。
-      var toggleVoice = function () {
-        if (recorderRef.current !== null && recorderRef.current.state === "recording") {
-          try { recorderRef.current.stop(); } catch (error) { /* 已停止 */ }
-          return;
-        }
-        var canRecord = typeof navigator !== "undefined" && navigator.mediaDevices &&
-          typeof navigator.mediaDevices.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
-        if (!canRecord) {
-          if (sttSettings.fallbackWebSpeech === true) { startWebSpeech(); return; }
-          setBanner("这个客户端不支持直接录音（MediaRecorder 不可用）；点「语音」可用本地 STT，或在设置里打开回退");
-          return;
-        }
+      var startRecording = function (keepHint) {
         navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(function (stream) {
           var track = stream.getAudioTracks()[0];
           if (track === undefined) { setBanner("麦克风没有音频轨道：检查系统麦克风设备"); stream.getTracks().forEach(function (t) { t.stop(); }); return; }
@@ -1738,7 +1742,7 @@ window.__ModuleLoader__.load({
           };
           mr.start();
           setMicOn(true);
-          setBanner("");
+          if (keepHint !== true) setBanner("");
         }).catch(function (error) {
           var name = String(error && error.name ? error.name : "");
           var msg = String(error && error.message ? error.message : error);
@@ -1753,6 +1757,34 @@ window.__ModuleLoader__.load({
           }
           setBanner("拿不到麦克风（" + msg + "）。点「语音」可检查本地 STT，或在设置里打开「回退浏览器识别」");
         });
+      };
+
+      // 点麦克风先看权限：没授权就先把「去哪里授权」说清楚，再决定要不要开口。
+      var toggleVoice = function () {
+        if (recorderRef.current !== null && recorderRef.current.state === "recording") {
+          try { recorderRef.current.stop(); } catch (error) { /* 已停止 */ }
+          return;
+        }
+        var canRecord = typeof navigator !== "undefined" && navigator.mediaDevices &&
+          typeof navigator.mediaDevices.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
+        if (!canRecord) {
+          if (sttSettings.fallbackWebSpeech === true) { startWebSpeech(); return; }
+          setBanner("这个客户端不支持直接录音（MediaRecorder 不可用）；点「语音」可用本地 STT，或在设置里打开回退");
+          return;
+        }
+        checkMicPermission().then(function (state) {
+          setMicPerm(state);
+          if (state === "denied") {
+            setBanner("麦克风权限被拒绝：打开 系统设置 → 隐私与安全性 → 麦克风，勾选 DSH Desktop，然后重启 DSH 再试");
+            return;
+          }
+          if (state === "prompt" || state === "unknown") {
+            setBanner("需要麦克风权限：系统会弹窗，请点「允许」；没弹窗就去 系统设置 → 隐私与安全性 → 麦克风 勾选 DSH Desktop");
+          } else {
+            setBanner("");
+          }
+          startRecording(state !== "granted");
+        }).catch(function () { startRecording(true); });
       };
       var formState = useState(null);
       var form = formState[0];
@@ -2273,6 +2305,13 @@ window.__ModuleLoader__.load({
               h("div", { className: "ats-preset-title" }, "本地语音识别 · jianchang512/stt"),
               h("div", { className: "ats-sub", style: { margin: "4px 0 6px" } },
                 "本地 faster-whisper 服务（默认 http://127.0.0.1:9977）。不可用时自动回退浏览器识别。"),
+              h("div", { className: "ats-sub", style: { margin: "2px 0 6px" } },
+                "麦克风权限：" + (micPerm === "granted" ? "已授权" : micPerm === "denied" ? "已被拒绝（系统设置 → 隐私与安全性 → 麦克风 → 勾选 DSH Desktop）" : micPerm === "prompt" ? "未授权（点 🎤 时系统会弹窗）" : "未知"),
+                h("button", {
+                  className: "ats-btn tiny", style: { marginLeft: "6px" }, type: "button",
+                  onClick: function () { checkMicPermission().then(setMicPerm); }
+                }, "检测权限")
+              ),
               h("div", { className: "ats-bar" },
                 h("input", {
                   className: "ats-input", style: { flex: "1 1 220px" }, value: sttSettings.baseUrl,
