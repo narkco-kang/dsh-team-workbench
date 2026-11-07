@@ -591,9 +591,14 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
 
   const runTurn = async (member, depth, lastSpeaker) => {
     const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
+    // DS-Bot：每个成员只看「上次看过之后」的新消息，不重复灌整段历史。
+    target.seen = target.seen !== null && typeof target.seen === 'object' ? target.seen : {}
+    const since = target.seen[member.id]
+    const history = target.messages.slice(0, -1).filter((message) => since === undefined || String(message.time || '') > String(since))
+    target.seen[member.id] = new Date().toISOString()
     const prompt = depth === 0 && admin !== undefined && member.id === admin.id
-      ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
-      : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
+      ? adminPrompt(target, alive, history, userText, memoryText)
+      : memberPrompt(target, member, alive, history, userText, lastSpeaker, memoryText)
     const step = { name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0, emoji: member.emoji }
     target.progress.steps.push(step)
     if (target.progress.parallel.length < 2) target.progress.current = member.name
@@ -622,6 +627,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     let cursor = 0
     // 超出并发的成员进队列，状态条显示「排队 N 位」。
     target.progress.queued = batch.map((member) => member.name)
+    // DS-Bot：干活超过 grace（15 秒）就让本轮继续，它做完再补发到群里。
+    const WORK_GRACE_MS = Number(process.env.TW_WORK_GRACE_MS) || 15000
     const lane = async () => {
       while (cursor < batch.length) {
         const index = cursor
@@ -630,7 +637,24 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         target.progress.queued = target.progress.queued.filter((name) => name !== member.name)
         target.progress.parallel = target.progress.parallel.concat(member.name)
         await persist()
-        results[index] = await runTurn(member, depth, lastSpeaker)
+        const running = runTurn(member, depth, lastSpeaker)
+        const grace = await Promise.race([
+          running.then((value) => value),
+          new Promise((resolve) => setTimeout(() => resolve(undefined), WORK_GRACE_MS))
+        ])
+        if (grace !== undefined) {
+          results[index] = grace
+        } else {
+          // 超过 grace：本轮不阻塞，完成时 runTurn 自己会把回复写进群里。
+          target.progress.background = (Array.isArray(target.progress.background) ? target.progress.background : []).concat(member.name)
+          running.then(async () => {
+            target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
+            await persist()
+          }, async () => {
+            target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
+            await persist()
+          })
+        }
       }
     }
     const lanes = Math.min(parallelOn ? maxParallel : 1, batch.length)

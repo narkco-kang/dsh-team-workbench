@@ -3226,7 +3226,29 @@ window.__ModuleLoader__.load({
             return undefined;
           })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
-          .then(function () { delete PENDING_CHATS[pendingKey]; setSendTo(null); clearInterval(poll); setThinkingProgress(null); setBusy(false); setBusyTarget(null); });
+          .then(function () {
+            delete PENDING_CHATS[pendingKey];
+            setSendTo(null);
+            clearInterval(poll);
+            setThinkingProgress(null);
+            setBusy(false);
+            setBusyTarget(null);
+            // DS-Bot：超过 grace 的成员会在之后补发，这里补两次刷新把它捞回来。
+            [6000, 20000].forEach(function (delay) {
+              setTimeout(function () {
+                fetch(threadUrl, { cache: "no-store" })
+                  .then(function (res) { return readJsonResponse(res); })
+                  .then(function (payload) {
+                    var next = Array.isArray(payload.messages) ? payload.messages : [];
+                    if (next.length > 0) {
+                      THREAD_CACHE[THREAD_CACHE_PREFIX + threadUrl] = next;
+                      setMessages(next);
+                    }
+                  })
+                  .catch(function () { /* 忽略 */ });
+              }, delay);
+            });
+          });
       };
 
       var openForm = function () {
