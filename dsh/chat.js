@@ -39,6 +39,7 @@ import {
   searchMemoryHybrid,
   slotOf
 } from './memory.js'
+import { loadSttSettings, probeStt, saveSttSettings, transcribe } from './stt.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -46,6 +47,7 @@ const GROUP_ROUTE = ROUTE_BASE + '/chats/group'
 const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
 const SEARCH_ROUTE = ROUTE_BASE + '/chats/search'
 const MEMORY_ROUTE = ROUTE_BASE + '/memory'
+const STT_ROUTE = ROUTE_BASE + '/stt'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -729,6 +731,43 @@ export function apply(ctx) {
         return json({ ok: true, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: STT_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const url = new URL(request.url)
+        if (request.method === 'GET') {
+          const settings = await loadSttSettings()
+          const probe = url.searchParams.get('probe') === '1' ? await probeStt(settings) : null
+          return json({ ok: true, settings, probe })
+        }
+        const type = String(request.headers.get('content-type') || '')
+        if (type.includes('application/json')) {
+          const body = await readJson(request)
+          if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+          if (text(body.action) === 'settings') {
+            const saved = await saveSttSettings(body.stt !== null && typeof body.stt === 'object' ? body.stt : {})
+            return json({ ok: true, settings: saved })
+          }
+          if (text(body.action) === 'probe') return json({ ok: true, probe: await probeStt(await loadSttSettings()) })
+          return json({ ok: false, error: '未知的 action' }, 400)
+        }
+        const bytes = Buffer.from(await request.arrayBuffer())
+        const settings = await loadSttSettings()
+        const value = await transcribe(bytes, {
+          settings,
+          filename: url.searchParams.get('filename') || 'speech.webm',
+          contentType: type || 'audio/webm'
+        })
+        return json({ ok: true, text: value })
+      } catch (error) {
+        return json({ ok: false, error: String(error && error.message ? error.message : error) }, 500)
       }
     }
   }))

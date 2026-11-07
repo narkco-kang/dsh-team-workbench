@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2.18.0 — 2026-11-07
+
+- 语音输入接入本地 STT（jianchang512/stt，faster-whisper）：麦克风录 webm → POST /api/team-workbench/stt
+  → 插件转发到本地服务 {baseUrl}/api（language/model/response_format=text），识别结果插入输入框；
+- 新增路由 GET/POST /stt（读设置 / 保存设置 / 探测 / 转写），路由 22 → 23；
+- 语音设置面板（聊天头部「语音」）：地址、模型 tiny→large-v3、语言、启用开关、保存、测试；
+- 录音计时（● 录音 Ns · 再点结束）与「识别中…」状态；本地 STT 不可用自动回退浏览器 Web Speech API；
+- 配置存 stt-settings.json，默认 http://127.0.0.1:9977 + tiny。
+
 ## 2.17.0 — 2026-11-07
 
 - 群聊/总管台改为「并行接力」（参考 dsh-superagent 的 worker slot + 并发启动）：同一层被 @ 的成员

@@ -90,6 +90,18 @@ window.fetch = function (url, init) {
   else if (u.indexOf('/api/team-workbench/roles') === 0) data = window.__DSH_PREVIEW__.roles;
   else if (u.indexOf('/api/team-workbench/skills') === 0) data = { ok: true, skills: [], deployed: [] };
   else if (u.indexOf('/api/team-workbench/chats/private') === 0) data = { ok: true, member: null, messages: window.__DSH_PREVIEW__.messages.private };
+  if (u.indexOf('/api/team-workbench/stt') === 0) {
+    var sttHeaders = (init && init.headers) || {};
+    var sttType = String(sttHeaders['content-type'] || sttHeaders['Content-Type'] || '');
+    if (init && String(init.method || '').toUpperCase() === 'POST' && sttType.indexOf('json') >= 0) {
+      data = { ok: true, settings: JSON.parse(init.body || '{}').stt };
+    } else if (init && String(init.method || '').toUpperCase() === 'POST') {
+      data = { ok: true, text: '演示上午十点开始' };
+    } else {
+      data = { ok: true, settings: { enabled: true, baseUrl: 'http://127.0.0.1:9977', model: 'tiny', language: 'zh' }, probe: u.indexOf('probe=1') >= 0 ? { ok: true, status: 200 } : null };
+    }
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
+  }
   if (u.indexOf('progress=1') >= 0) {
     // 仅供截图：按发送后经过的时间伪造「正在接力」的过程。
     var started = window.__DSH_PREVIEW__.sendStart || 0;
