@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2.82.0 — 2026-11-08
+
+参考 OpenMausBot 的 bring-your-own-agents：
+- 扫描本机 agent 平台（Claude Code / Codex / Grok CLI / Ollama），自动变成团队 bot；
+- 插件启动后 1.5s 自动接入；打开智能体团队时也会补扫一次，已接入的按 sourcePlatform 去重；
+- 顶部新增「🔌 接入本机 agent」手动触发；
+- 新增 /platforms 路由与 test/platforms.test.mjs（5 项）。
+
 ## 2.81.0 — 2026-11-08
 
 - 常驻 Agent 复用（实验）：每个成员首次派发时用 ctx.agents.create 建一个常驻 Agent，

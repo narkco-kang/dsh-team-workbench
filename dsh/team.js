@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.81.0'
+const PLUGIN_VERSION = '2.82.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -76,6 +76,7 @@ const AVATAR_ROUTE = ROUTE_BASE + '/avatar'
 const AVATAR_LIBRARY_ROUTE = ROUTE_BASE + '/avatar-library'
 const USAGE_ROUTE = ROUTE_BASE + '/usage'
 const BALANCE_ROUTE = ROUTE_BASE + '/balance'
+const PLATFORMS_ROUTE = ROUTE_BASE + '/platforms'
 const BALANCE_KEY_ROUTE = ROUTE_BASE + '/balance/key'
 
 /** 推理强度选项（与 dsh-llm 的 ReasoningEffortId 对齐）。 */
@@ -245,7 +246,9 @@ function normalizeMember(raw, index) {
     routes,
     activeRouteId,
     // 部门成员：department 非空时，这个成员是一整个部门，subAgents 是它内部的子智能体。
-    department: normalizeDepartment(source.department)
+    department: normalizeDepartment(source.department),
+    // 从本机 agent 平台接入的成员，记下来源，避免重复导入。
+    sourcePlatform: text(source.sourcePlatform)
   }
 }
 
@@ -2606,6 +2609,32 @@ export function apply(ctx, config) {
     }
   }))
 
+  // 本机 agent 平台：扫描 + 默认接入为 bot（对齐 OpenMausBot 的 bring-your-own-agents）。
+  own(ctx.connection.fetch.register({
+    path: PLATFORMS_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const mod = await import('./platforms.js')
+        if (request.method === 'POST') {
+          const body = await readJson(request)
+          const result = await mod.importPlatforms({ ids: Array.isArray(body?.ids) ? body.ids : undefined })
+          return json({ ok: true, ...result })
+        }
+        const url = new URL(request.url)
+        const auto = url.searchParams.get('auto') === '1'
+        if (auto) {
+          const result = await mod.importPlatforms({})
+          return json({ ok: true, auto: true, ...result })
+        }
+        return json({ ok: true, platforms: await mod.scanPlatforms() })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
   own(ctx.connection.fetch.register({
     path: BALANCE_KEY_ROUTE,
     methods: ['POST'],
@@ -2668,5 +2697,14 @@ export function apply(ctx, config) {
   // 组合两个半体。release() 自身幂等，被调用两次没有副作用。
   // （旧插件没有返回它——那时只靠 ctx.effect 兜底；组合场景下必须显式返回，
   //   否则外层释放不到本半体的路由与工具。）
-  return () => handle.release()
+  // 默认接入：插件启动后扫描本机 agent 平台，自动变成 bot（已接入的会跳过）。
+  const autoTimer = setTimeout(() => {
+    import('./platforms.js').then((mod) => mod.importPlatforms({})).catch(() => undefined)
+  }, 1500)
+  if (typeof autoTimer.unref === 'function') autoTimer.unref()
+
+  return () => {
+    clearTimeout(autoTimer)
+    return handle.release()
+  }
 }
