@@ -410,13 +410,14 @@ window.__ModuleLoader__.load({
         signal: AbortSignal.timeout(150000)
       }).then(function (res) {
         var type = String(res.headers.get("content-type") || "");
-        if (!res.ok || type.indexOf("json") < 0) {
-          // 路由没注册时宿主会回 404 + HTML，别把它当成识别失败去回退浏览器。
+        // 路由没注册时宿主会回 404 + HTML；接口异常时是 JSON {ok:false,error}——两种都要能读出原因。
+        if (type.indexOf("json") < 0) {
           if (res.status === 404) throw new Error("语音接口未就绪（重启 Harness 后生效）");
           throw new Error("语音接口异常 HTTP " + res.status);
         }
         return res.json().then(function (payload) {
           if (!payload || payload.ok === false) throw new Error((payload && payload.error) || "语音识别失败");
+          if (!res.ok) throw new Error("语音接口异常 HTTP " + res.status);
           return payload;
         });
       });
@@ -1613,6 +1614,7 @@ window.__ModuleLoader__.load({
           return "本地语音服务没启动（" + base + "）。在 stt 目录执行 ./venv/bin/python start.py，或点「语音」改地址";
         }
         if (raw.indexOf("STT HTTP 404") >= 0) return "地址不对：这里需要一个能处理 /api 的 stt 服务（当前 " + base + "）";
+        if (raw.indexOf("语音接口异常") >= 0) return raw + "：看 Harness 控制台里 stt 的报错，或先点「测试」确认服务在线";
         if (raw.indexOf("音频为空") >= 0) return "没录到声音：检查系统麦克风权限，或说话时离麦近一点";
         if (raw.indexOf("没有识别到内容") >= 0) return raw;
         return raw.length > 120 ? raw.slice(0, 120) + "…" : raw;
