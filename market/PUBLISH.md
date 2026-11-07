@@ -1,7 +1,11 @@
-# 发布到工作台市场
+# 发布到插件市场
 
-目标：DSH Desktop 内置工作台市场（schemaVersion 2），收录仓库为
-[dataelement/awesome-dsh-workbench](https://github.com/dataelement/awesome-dsh-workbench)。
+目标：DSH 插件市场 [awesome-dsh-plugin/awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+（站点 https://awesome-dsh-plugin.com，Desktop 的 Plugins → Discover 读的就是它的 index）。
+
+> 2.0.0 起本仓库是 **DSH 网页客户端插件**（`dsh.client`），不再注册工作台；旧的工作台条目
+> （dataelement/awesome-dsh-workbench）已撤回，投稿请走插件市场，一个仓库一个 YAML：
+> `data/plugins/narkco-kang__dsh-team-workbench.yml`。
 
 ## 1. 身份
 
@@ -17,25 +21,20 @@
 
 ## 3. 收录 YAML
 
-向 awesome-dsh-workbench 提 PR，只新增 `data/workbenches/narkco-kang__dsh-team-workbench.yml`：
+向 awesome-dsh-plugin 提 PR，只新增 `data/plugins/narkco-kang__dsh-team-workbench.yml`：
 
 ```yaml
 url: https://github.com/narkco-kang/dsh-team-workbench
-name: 智能体团队 · 技能管理工作台
-nameEn: Agent Team Skill Workbench
-category: operations
+name: narkco-kang/dsh-team-workbench
+category: ui
 description:
-  zh: …
-en:
-  en: …
-screenshots:
-  - https://raw.githubusercontent.com/narkco-kang/dsh-team-workbench/main/market/screenshots/team.png
-  - https://raw.githubusercontent.com/narkco-kang/dsh-team-workbench/main/market/screenshots/roles.png
-tarball: https://github.com/narkco-kang/dsh-team-workbench/releases/latest/download/dsh-team-workbench.tgz
+  en: 'One-line description of the workbench.'
+  zh: '一句话中文描述。'
 ```
 
-字段约束见该仓库的 `catalog/README.md` 与 `schema/workbench.schema.json`；不要写版本、校验值、
-作者 ID 或 `workbenchId`。
+字段约束见该仓库 `contributing.md`：`description.en` 必填、含 `: ` 时必须加引号、
+仓库需有 `dsh.bundle`（本包有）且创建满 1 天；不要写版本、校验值或作者 ID。
+2026-11-07 的投稿 PR：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13055
 
 ## 4. 投稿前自查
 
