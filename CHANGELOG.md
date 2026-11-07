@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.5.0 — 2026-11-07
+
+- 新增「额度」页：直连服务商官方余额接口，支持 DeepSeek 官方 / Moonshot(Kimi) / OpenRouter；
+- Key 存在 `$DSH_HOME/agent-team-studio/balance-keys.json`（0600），不返回前端、不写日志；
+- 新增 `GET /balance` 与 `POST /balance/key`（共 21 条路由）；余额每 60 秒刷新一次。
+
+## 2.4.0 — 2026-11-07
 ## 2.4.0 — 2026-11-07
 
 - 群聊顶部换成成员头像堆叠（最多 3 张 + N）；

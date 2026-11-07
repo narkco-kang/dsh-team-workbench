@@ -341,6 +341,14 @@ window.__ModuleLoader__.load({
       var params = "?q=" + encodeURIComponent(query || "") + "&kind=" + encodeURIComponent(kind || "") + "&id=" + encodeURIComponent(id || "");
       return fetch("/api/team-workbench/chats/search" + params, { cache: "no-store" }).then(unwrap);
     }
+    /** 服务商余额（GET /balance）。 */
+    function fetchBalances(force) {
+      return fetch("/api/team-workbench/balance" + (force ? "?force=1" : ""), { cache: "no-store" }).then(unwrap);
+    }
+    /** 保存或清除余额查询用的 Key（POST /balance/key）。 */
+    function postBalanceKey(id, key) {
+      return fetch("/api/team-workbench/balance/key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: id, key: key }) }).then(unwrap);
+    }
     /** 本机派发用量（GET /usage）。 */
     function fetchUsage() {
       return fetch("/api/team-workbench/usage", { cache: "no-store" }).then(unwrap);
@@ -1750,6 +1758,85 @@ window.__ModuleLoader__.load({
     }
     //#endregion
 
+    //#region 服务商余额
+    var BALANCE_PROVIDERS = [
+      { id: "deepseek", name: "DeepSeek 官方", hint: "platform.deepseek.com 的 API Key（sk-…）" },
+      { id: "moonshot", name: "Moonshot / Kimi", hint: "platform.moonshot.cn 的 API Key（sk-…）" },
+      { id: "openrouter", name: "OpenRouter", hint: "openrouter.ai/keys 的 Key（sk-or-…）" }
+    ];
+
+    function BalancePanel() {
+      var dataState = useState({ loading: true, error: "", items: [] });
+      var data = dataState[0];
+      var setData = dataState[1];
+      var keyState = useState({});
+      var keys = keyState[0];
+      var setKeys = keyState[1];
+      var busyState = useState("");
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+
+      var load = useCallback(function (force) {
+        setData(function (prev) { return Object.assign({}, prev, { loading: true }); });
+        fetchBalances(force).then(function (payload) {
+          setData({ loading: false, error: "", items: payload.items || [] });
+        }).catch(function (error) {
+          setData({ loading: false, error: String(error && error.message ? error.message : error), items: [] });
+        });
+      }, []);
+
+      useEffect(function () {
+        load(false);
+        var timer = setInterval(function () { load(false); }, 60000);
+        return function () { clearInterval(timer); };
+      }, [load]);
+
+      var save = function (id) {
+        setBusy(id);
+        postBalanceKey(id, keys[id] || "").then(function (payload) {
+          setData({ loading: false, error: "", items: payload.items || [] });
+          setKeys(function (prev) { var next = Object.assign({}, prev); next[id] = ""; return next; });
+        }).catch(function (error) {
+          setData(function (prev) { return Object.assign({}, prev, { error: String(error && error.message ? error.message : error) }); });
+        }).then(function () { setBusy(""); });
+      };
+
+      return h("div", { className: "ats-root" },
+        h("div", { className: "ats-hero" },
+          h("div", { style: { minWidth: 0 } },
+            h("div", { className: "ats-hero-title" }, "服务商余额"),
+            h("div", { className: "ats-hero-sub" }, "直接查官方余额接口；Key 只存在本机（0600），只发给对应服务商域名，不返回给界面")
+          ),
+          h("span", { className: "ats-spacer" }),
+          h("button", { className: "ats-btn tiny", type: "button", disabled: data.loading, onClick: function () { load(true); } }, data.loading ? "查询中…" : "刷新")
+        ),
+        data.error ? h("div", { className: "ats-sub", style: { color: "#dc2626" } }, data.error) : null,
+        h("div", { className: "ats-list" },
+          BALANCE_PROVIDERS.map(function (provider) {
+            var item = (data.items || []).filter(function (row) { return row.id === provider.id; })[0] || { configured: false, ok: false, balance: null, currency: "", detail: "", error: "", checkedAt: "" };
+            return h("div", { key: provider.id, className: "ats-card", style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "8px" } },
+              h("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                h("span", { className: "ats-name" }, provider.name),
+                h("span", { className: "ats-tag" }, item.configured ? (item.ok ? "已连接" : "查询失败") : "未配置")
+              ),
+              h("div", { className: "ats-sub", style: { fontSize: "11.5px", opacity: .75 } }, provider.hint),
+              item.ok && item.balance !== null
+                ? h("div", { style: { fontSize: "20px", fontWeight: 700 } }, (item.currency === "USD" ? "$" : "¥") + String(item.balance), h("span", { style: { fontSize: "11px", fontWeight: 400, opacity: .6, marginLeft: "8px" } }, item.detail))
+                : null,
+              item.error ? h("div", { className: "ats-sub", style: { color: "#dc2626", fontSize: "11px" } }, item.error) : null,
+              h("div", { style: { display: "flex", gap: "6px" } },
+                h("input", { className: "ats-input", type: "password", placeholder: item.configured ? "已保存，输入新 Key 可替换" : "粘贴 API Key", value: keys[provider.id] || "", onChange: function (e) { var value = e.target.value; setKeys(function (prev) { var next = Object.assign({}, prev); next[provider.id] = value; return next; }); } }),
+                h("button", { className: "ats-btn tiny primary", type: "button", disabled: busy === provider.id, onClick: function () { save(provider.id); } }, busy === provider.id ? "保存中…" : item.configured ? "更新" : "保存"),
+                item.configured ? h("button", { className: "ats-btn tiny danger", type: "button", disabled: busy === provider.id, onClick: function () { setKeys(function (prev) { var next = Object.assign({}, prev); next[provider.id] = ""; return next; }); save(provider.id); } }, "清除") : null
+              ),
+              item.checkedAt ? h("div", { className: "ats-sub", style: { fontSize: "10.5px", opacity: .5 } }, "更新于 " + agoText(item.checkedAt)) : null
+            );
+          })
+        )
+      );
+    }
+    //#endregion
+
     //#region 共享技能库面板
     /** 技能库路由前缀（服务端 dsh/skills.js）。 */
     var BASE = "/api/team-workbench/skills";
@@ -1981,7 +2068,7 @@ window.__ModuleLoader__.load({
     function readTab() {
       try {
         var raw = window.localStorage.getItem(TW_STORAGE_KEY);
-        if (raw === "team" || raw === "chat" || raw === "records" || raw === "roles" || raw === "skills") return raw;
+        if (raw === "team" || raw === "chat" || raw === "records" || raw === "roles" || raw === "skills" || raw === "balance") return raw;
       } catch (e) { /* 隐私模式降级为默认标签 */ }
       return "chat";
     }
@@ -2019,6 +2106,7 @@ window.__ModuleLoader__.load({
       var body = null;
       if (tab === "chat") body = h(ChatPanel, { scope: scope, initialMember: chatTarget, initialRoom: chatRoom, onOpenSettings: function () { pick("team"); } });
       else if (tab === "team") body = h(AgentTeamPanel, { scope: scope, onOpenRoles: function () { pick("roles"); }, onChat: function (memberId) { setChatTarget(memberId); setChatRoom(""); pick("chat"); } });
+      else if (tab === "balance") body = h(BalancePanel);
       else if (tab === "records") body = h(RecordSearch, { onOpen: function (kind, id) { if (kind === "group") { setChatRoom(id); setChatTarget(""); } else { setChatTarget(id); setChatRoom(""); } pick("chat"); } });
       else if (tab === "roles") body = h(RoleLibrary, { onTeamChanged: function () { pick("team"); } });
       else body = h(SkillManager);
@@ -2033,6 +2121,7 @@ window.__ModuleLoader__.load({
             tabBtn("chat", "聊天"),
             tabBtn("team", "团队"),
             tabBtn("records", "记录"),
+            tabBtn("balance", "额度"),
             tabBtn("roles", "角色库"),
             tabBtn("skills", "技能库")
           ),

@@ -116,6 +116,9 @@ await call('/api/team-workbench/chats/rooms', { action: 'update', id: roomId, ro
 const shallow = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '再确认一下范围' })
 check('lead 房 relayDepth=0 不再转发 @', shallow.turns.length === 1 && shallow.turns[0].name === architect.name, String(shallow.turns && shallow.turns.length))
 
+const balance = await call('/api/team-workbench/balance')
+check('余额接口可用（未配置 Key 时列出三个服务商）', balance.ok === true && Array.isArray(balance.items) && balance.items.length === 3, String((balance.items || []).length))
+
 const usage = await call('/api/team-workbench/usage')
 check('用量统计接口可用', usage.ok === true && Array.isArray(usage.models) && Array.isArray(usage.members), String((usage.models || []).length) + ' 个模型')
 

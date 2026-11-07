@@ -20,6 +20,7 @@
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { readBalances, writeKey } from './balance.js'
 import {
   colorOfName,
   decodeImageDataUrl,
@@ -56,7 +57,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.4.0'
+const PLUGIN_VERSION = '2.5.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -70,6 +71,8 @@ const ROLE_BODY_ROUTE = ROUTE_BASE + '/roles/body'
 const PRESET_ROUTE = ROUTE_BASE + '/preset'
 const AVATAR_ROUTE = ROUTE_BASE + '/avatar'
 const USAGE_ROUTE = ROUTE_BASE + '/usage'
+const BALANCE_ROUTE = ROUTE_BASE + '/balance'
+const BALANCE_KEY_ROUTE = ROUTE_BASE + '/balance/key'
 
 /** 推理强度选项（与 dsh-llm 的 ReasoningEffortId 对齐）。 */
 const EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'max']
@@ -1680,6 +1683,36 @@ export function apply(ctx, config) {
         return json({ ok: true, models: [...models.values()], members: [...members.values()] })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: BALANCE_ROUTE,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const force = new URL(request.url).searchParams.get('force') === '1'
+        return json({ ok: true, items: await readBalances(force) })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: BALANCE_KEY_ROUTE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        await writeKey(text(body.id), text(body.key))
+        return json({ ok: true, items: await readBalances(true) })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 400)
       }
     }
   }))

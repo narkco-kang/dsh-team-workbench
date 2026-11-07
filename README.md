@@ -119,8 +119,8 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 
 | 层次 | 覆盖情况 |
 | --- | --- |
-| 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 16 项） |
-| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 19 路由、释放后登记表清空） |
+| 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 18 项） |
+| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 21 路由、释放后登记表清空） |
 | 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
 | 会话功能 | `smoke-chat.mjs`（20 项：私聊连续追问、群聊 @、Auto 挑人、接力层数、工具调用、聊天记录检索） |
 | 数据层功能 | `smoke-v12.mjs`（预设 15 人 6 组、角色导入、分组增删、角色检索与正文） |

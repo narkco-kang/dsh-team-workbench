@@ -132,6 +132,10 @@ const chat = renderWith('chat')
 check('会话标签渲染成功（无抛错）', !chat.errors.some((e) => e.startsWith('render 抛错')), chat.errors.find((e) => e.startsWith('render 抛错')))
 check('会话标签渲染出私聊/群聊/建群', chat.html.includes('私聊') && chat.html.includes('群聊') && chat.html.includes('建群'))
 
+const balance = renderWith('balance')
+check('额度标签渲染成功（无抛错）', !balance.errors.some((e) => e.startsWith('render 抛错')), balance.errors.find((e) => e.startsWith('render 抛错')))
+check('额度标签渲染出服务商卡片', balance.html.includes('服务商余额') && balance.html.includes('DeepSeek 官方'))
+
 const records = renderWith('records')
 check('记录标签渲染成功（无抛错）', !records.errors.some((e) => e.startsWith('render 抛错')), records.errors.find((e) => e.startsWith('render 抛错')))
 check('记录标签渲染出检索入口', records.html.includes('会话记录') && records.html.includes('搜索聊天内容'))
