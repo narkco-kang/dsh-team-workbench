@@ -388,6 +388,11 @@ window.__ModuleLoader__.load({
       ".ats-mention-row.on,.ats-mention-row:hover{background:rgba(77,107,254,.12);}",
       ".ats-mention-name{font-size:12.5px;font-weight:600;}",
       ".ats-mention-role{font-size:11px;opacity:.55;}",
+      ".ats-status{display:flex;align-items:center;gap:7px;width:100%;max-width:1000px;min-height:22px;margin:0 0 4px;padding:5px 10px;border-radius:10px;background:rgba(127,127,127,.08);font-size:12px;color:var(--bt-ink-3);overflow:hidden;}",
+      ".ats-status.on{background:rgba(77,107,254,.08);color:var(--bt-ink-2);}",
+      ".ats-status-spin{display:inline-block;flex:0 0 auto;width:12px;height:12px;border-radius:50%;border:1.6px solid rgba(77,107,254,.35);border-top-color:var(--bt-accent);animation:atsSpin .9s linear infinite;}",
+      ".ats-status-detail{opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}",
+      "@keyframes atsSpin{to{transform:rotate(360deg);}}",
       ".ats-thinking{display:flex;align-items:center;gap:7px;width:100%;max-width:1000px;min-height:22px;margin:0 0 8px;padding:0 2px;font-size:12px;color:var(--bt-ink-3);}",
       ".ats-thinking.on{align-self:flex-start;width:auto;max-width:1000px;padding:3px 10px 3px 6px;border-radius:999px;background:rgba(77,107,254,.10);color:var(--bt-accent);font-size:11.5px;}",
       ".ats-thinking.on{color:var(--bt-ink-2);}",
@@ -3557,6 +3562,26 @@ window.__ModuleLoader__.load({
                 })
           ),
           h("div", { className: "ats-compose" },
+            // 仿 DSH 输入框上方的处理状态：一行「正在分析请求 · 当前在做什么」。
+            h("div", { className: "ats-status" + (thinkingHere ? " on" : "") },
+              thinkingHere
+                ? [
+                    h("span", { key: "spin", className: "ats-status-spin" }),
+                    h("span", { key: "label" }, "正在分析请求"),
+                    h("span", { key: "sep" }, "·"),
+                    h("span", { key: "detail", className: "ats-status-detail" }, (function () {
+                      if (thinkingProgress) {
+                        if (Array.isArray(thinkingProgress.parallel) && thinkingProgress.parallel.length > 1) {
+                          return "「" + thinkingProgress.parallel.slice(0, 3).join("、") + "」并行处理中";
+                        }
+                        if (thinkingProgress.current) return String(thinkingProgress.current) + " 正在回答";
+                        if (Array.isArray(thinkingProgress.queued) && thinkingProgress.queued.length > 0) return "排队 " + String(thinkingProgress.queued.length) + " 位成员";
+                      }
+                      return "「" + (thinkingWho || (currentRoom ? (currentRoom.adminName || "管理员") : title)) + "」正在思考";
+                    })())
+                  ]
+                : null
+            ),
             h("div", { className: "ats-thinking" + (thinkingHere ? " on" : "") },
               thinkingHere
                 ? [
