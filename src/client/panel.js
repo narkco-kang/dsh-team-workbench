@@ -2581,7 +2581,12 @@ window.__ModuleLoader__.load({
         var timer = setInterval(function () { setTick(function (n) { return n + 1; }); }, 500);
         return function () { clearInterval(timer); };
       }, [busy]);
-      var thinkingSeconds = busy && thinkingStart > 0 ? Math.max(0, Math.round((Date.now() - thinkingStart) / 1000)) : 0;
+      var thinkingBase = thinkingStart > 0
+        ? thinkingStart
+        : (thinkingProgress && thinkingProgress.startedAt ? Date.parse(thinkingProgress.startedAt) : 0);
+      var thinkingSeconds = (busy || (thinkingProgress && !thinkingProgress.finishedAt)) && thinkingBase > 0
+        ? Math.max(0, Math.round((Date.now() - thinkingBase) / 1000))
+        : 0;
       // 过程化状态：轮询服务端的 progress，能看到「现在轮到谁」和已经跑完的每一棒。
       var thinkingProgressState = useState(null);
       var thinkingProgress = thinkingProgressState[0];
@@ -2603,7 +2608,9 @@ window.__ModuleLoader__.load({
         return hit && hit.emoji ? hit.emoji : "";
       })();
       // 只有「当前这段会话」自己的请求在跑时才显示思考条；切到别的会话不会串台。
-      var thinkingHere = busy && busyTarget !== null && target !== null && busyTarget.kind === target.kind && busyTarget.id === target.id;
+      var progressRunning = thinkingProgress !== null && thinkingProgress !== undefined && !thinkingProgress.finishedAt;
+      var thinkingHere = (busy || progressRunning) && target !== null &&
+        (busyTarget === null || (busyTarget.kind === target.kind && busyTarget.id === target.id));
       var bannerState = useState("");
       var banner = bannerState[0];
       var setBanner = bannerState[1];
@@ -3182,12 +3189,41 @@ window.__ModuleLoader__.load({
         var threadUrl = dest.kind === "private"
           ? "/api/team-workbench/chats/private?memberId=" + encodeURIComponent(dest.id)
           : "/api/team-workbench/chats/group?id=" + encodeURIComponent(dest.id);
+        // 像 DS-Bot 那样「谁说完谁就贴到群里」：轮询同时拉进度和消息，
+        // 不必等本轮全部结束才渲染。
+        var liveTicks = 0
         var poll = setInterval(function () {
+          liveTicks += 1
           fetch(progressUrl, { cache: "no-store" })
             .then(function (res) { return readJsonResponse(res); })
-            .then(function (json) { if (json && json.ok) setThinkingProgress(json.progress || null); })
-            .catch(function () { /* 状态轮询失败不影响发送 */ });
-        }, 700);
+            .then(function (json) {
+              if (!json || !json.ok) return
+              var progress = json.progress || null
+              setThinkingProgress(progress)
+              if (progress && progress.finishedAt && liveTicks > 2) {
+                // 本轮结束，再补一次消息就停。
+                fetch(threadUrl, { cache: "no-store" })
+                  .then(function (res) { return readJsonResponse(res); })
+                  .then(function (payload) {
+                    var list = Array.isArray(payload.messages) ? payload.messages : []
+                    THREAD_CACHE[THREAD_CACHE_PREFIX + threadUrl] = list
+                    setMessages(list)
+                  })
+                  .catch(function () { /* 忽略 */ })
+                clearInterval(poll)
+              }
+            })
+            .catch(function () { /* 状态轮询失败不影响发送 */ })
+          fetch(threadUrl, { cache: "no-store" })
+            .then(function (res) { return readJsonResponse(res); })
+            .then(function (payload) {
+              var list = Array.isArray(payload.messages) ? payload.messages : []
+              if (list.length === 0) return
+              THREAD_CACHE[THREAD_CACHE_PREFIX + threadUrl] = list
+              setMessages(list)
+            })
+            .catch(function () { /* 忽略 */ })
+        }, 1500);
         fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(240000) })
           .then(function (res) { return readJsonResponse(res).then(function (json) { if (!res.ok || json.ok === false) throw new Error(json.error || ("发送失败 HTTP " + res.status)); return json; }); })
           .then(function (json) {
@@ -3229,8 +3265,9 @@ window.__ModuleLoader__.load({
           .then(function () {
             delete PENDING_CHATS[pendingKey];
             setSendTo(null);
-            clearInterval(poll);
-            setThinkingProgress(null);
+            // 不在这里停轮询：本轮可能还在跑（20 秒后返回的是「已派出」）。
+            // 由 poll 自己在 progress.finishedAt 出现时收尾，另加 120 秒兜底。
+            setTimeout(function () { clearInterval(poll); setThinkingProgress(null); }, 120000);
             setBusy(false);
             setBusyTarget(null);
             // DS-Bot：超过 grace 的成员会在之后补发，这里补两次刷新把它捞回来。
