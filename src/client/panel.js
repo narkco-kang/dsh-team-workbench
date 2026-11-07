@@ -270,6 +270,11 @@ window.__ModuleLoader__.load({
       ".ats-mascot.working .ats-mascot-bob{animation-duration:1.1s;}",
       ".ats-mascot .ats-mascot-eyes{transform-box:fill-box;transform-origin:center;animation:ats-blink 5.2s infinite;}",
       ".ats-mascot.sleeping .ats-mascot-eyes{animation:none;transform:scaleY(.12);}",
+      ".ats-mascot.working .ats-mascot-eyes{transform:scaleY(.58);}",
+      ".ats-im-group-stack{display:inline-flex;align-items:center;flex:0 0 auto;min-width:40px;}",
+      ".ats-im-stack-cell{margin-left:-9px;border:2px solid var(--dsh-bg,#fff);border-radius:50%;background:var(--dsh-bg,#fff);line-height:0;}",
+      ".ats-im-stack-cell:first-child{margin-left:0;}",
+      ".ats-im-stack-more{font-size:10px;opacity:.65;margin-left:2px;}",
       "@keyframes ats-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.2px)}}",
       "@keyframes ats-blink{0%,92%,100%{transform:scaleY(1)}94%,96%{transform:scaleY(.08)}}",
       "@keyframes ats-poke{0%{transform:scale(1)}30%{transform:scale(.86,1.12)}65%{transform:scale(1.08,.93)}100%{transform:scale(1)}}",
@@ -1334,6 +1339,9 @@ window.__ModuleLoader__.load({
       var busyState = useState(false);
       var busy = busyState[0];
       var setBusy = busyState[1];
+      var busyTargetState = useState(null);
+      var busyTarget = busyTargetState[0];
+      var setBusyTarget = busyTargetState[1];
       var bannerState = useState("");
       var banner = bannerState[0];
       var setBanner = bannerState[1];
@@ -1405,6 +1413,7 @@ window.__ModuleLoader__.load({
         var body = draft.trim();
         if (body.length === 0 || target === null || busy) return;
         setBusy(true);
+        setBusyTarget(target);
         setBanner("");
         var path = target.kind === "private" ? "/api/team-workbench/chats/private" : "/api/team-workbench/chats/group";
         var payload = target.kind === "private"
@@ -1418,7 +1427,7 @@ window.__ModuleLoader__.load({
             loadOverview();
           })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
-          .then(function () { setBusy(false); });
+          .then(function () { setBusy(false); setBusyTarget(null); });
       };
 
       var openForm = function () {
@@ -1459,13 +1468,17 @@ window.__ModuleLoader__.load({
       var relayDepth = currentRoom && typeof currentRoom.relayDepth === "number" ? currentRoom.relayDepth : 1;
       var subtitle = currentRoom ? (currentRoom.adminName ? "管理员 " + currentRoom.adminName + " · " : "") + String(currentRoom.memberIds.length) + " 名成员 · " + responderLabel + " · 接力 " + String(relayDepth) + " 层" : "";
 
+      var memberById = {};
+      members.forEach(function (m) { memberById[m.memberId] = m; });
+
       var memberRow = function (m) {
         var on = target !== null && target.kind === "private" && target.id === m.memberId;
+        var working = busy && busyTarget !== null && busyTarget.kind === "private" && busyTarget.id === m.memberId;
         return h("button", {
           key: m.memberId, type: "button", className: "ats-im-row" + (on ? " on" : ""),
           onClick: function () { pickPrivate(m.memberId); }
         },
-          h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 32 }),
+          h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOf(m, members.indexOf(m)), size: 32, state: working ? "working" : "idle" }),
           h("span", { className: "ats-im-meta" },
             h("span", { className: "ats-im-name" }, m.name),
             h("span", { className: "ats-im-preview" }, m.count > 0 ? (m.lastText || "…") : "还没有对话")
@@ -1478,7 +1491,16 @@ window.__ModuleLoader__.load({
           key: room.id, type: "button", className: "ats-im-row" + (on ? " on" : ""),
           onClick: function () { pickRoom(room.id); }
         },
-          h("span", { className: "ats-im-group-avatar" }, "👥"),
+          h("span", { className: "ats-im-group-stack" },
+            (room.memberIds || []).slice(0, 3).map(function (memberId, index) {
+              var teammate = memberById[memberId];
+              if (teammate === undefined) return null;
+              return h("span", { key: memberId, className: "ats-im-stack-cell", style: { zIndex: 3 - index } },
+                h(Avatar, { member: { id: teammate.memberId, name: teammate.name, emoji: teammate.emoji, color: teammate.color, enabled: true }, accent: colorOf(teammate, members.indexOf(teammate)), size: 22 })
+              );
+            }),
+            (room.memberIds || []).length > 3 ? h("span", { className: "ats-im-stack-more" }, "+" + String(room.memberIds.length - 3)) : null
+          ),
           h("span", { className: "ats-im-meta" },
             h("span", { className: "ats-im-name" }, room.name),
             h("span", { className: "ats-im-preview" }, room.count > 0 ? (room.lastText || "…") : "还没有发言")
