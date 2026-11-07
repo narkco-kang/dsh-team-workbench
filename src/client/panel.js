@@ -1549,12 +1549,53 @@ window.__ModuleLoader__.load({
       var targetState = useState("");
       var target = targetState[0];
       var setTarget = targetState[1];
+      var deptState = useState({ busy: false, mode: "rotate", catalog: [], defaults: null });
+      var dept = deptState[0];
+      var setDept = deptState[1];
 
       useEffect(function () {
         fetchState().then(function (data) {
           setGroups(Array.isArray(data.groups) ? data.groups : []);
+          setDept(function (prev) {
+            return Object.assign({}, prev, {
+              catalog: Array.isArray(data.catalog) ? data.catalog : [],
+              defaults: data.defaults !== null && typeof data.defaults === "object" ? data.defaults : null
+            });
+          });
         }).catch(function () { /* 分组读取失败只影响「加入分组」，不影响浏览 */ });
       }, []);
+
+      // 部门级导入：整部门角色一次建成员，并按策略给每人配模型路由。
+      var modelPool = function () {
+        if (dept.mode === "default") {
+          return dept.defaults !== null && dept.defaults.provider ? [{ provider: dept.defaults.provider, model: dept.defaults.model }] : [];
+        }
+        var pool = [];
+        (dept.catalog || []).forEach(function (row) {
+          (row.models || []).forEach(function (entry) {
+            if (pool.length < 12) pool.push({ provider: row.id, model: entry.id });
+          });
+        });
+        return pool;
+      };
+      var importDepartment = function (departmentId) {
+        if (departmentId.length === 0) return;
+        setDept(function (prev) { return Object.assign({}, prev, { busy: true }); });
+        setBanner("");
+        fetchRoles("", departmentId, 0, 200).then(function (data) {
+          var roles = Array.isArray(data.roles) ? data.roles : [];
+          if (roles.length === 0) throw new Error("这个部门没有可加入的角色");
+          var label = departmentId;
+          (data.categories || []).forEach(function (c) { if (c.id === departmentId) label = c.name; });
+          return postRoles({ ids: roles.map(function (role) { return role.id; }), groupId: target, models: modelPool() }).then(function (payload) {
+            setBanner("已加入「" + label + "」" + String((payload.created || []).length) + " 个智能体，当前团队 " + String(payload.members.length) + " 名成员。");
+            if (props.onTeamChanged) props.onTeamChanged(payload);
+            return load(query, category, 0);
+          });
+        }).catch(function (error) {
+          setBanner(String(error && error.message ? error.message : error));
+        }).then(function () { setDept(function (prev) { return Object.assign({}, prev, { busy: false }); }); });
+      };
 
       var load = useCallback(function (nextQuery, nextCategory, nextOffset) {
         setList(function (prev) { return Object.assign({}, prev, { loading: true, error: "" }); });
@@ -1615,7 +1656,18 @@ window.__ModuleLoader__.load({
           h(SelectField, {
             label: "", value: target, options: [{ value: "", label: "加入：未分组" }].concat(groups.map(function (g) { return { value: g.id, label: "加入：" + g.name }; })),
             onChange: function (v) { setTarget(v); }
-          })
+          }),
+          h("select", {
+            className: "ats-select", style: { flex: "0 0 132px" }, value: dept.mode, title: "部门导入时的模型分配策略",
+            onChange: function (e) { setDept(function (prev) { return Object.assign({}, prev, { mode: e.target.value }); }); }
+          }, [["rotate", "模型：轮流分配"], ["default", "模型：跟随默认"]].map(function (pair) { return h("option", { key: pair[0], value: pair[0] }, pair[1]); })),
+          category.length > 0
+            ? h("button", {
+                className: "ats-btn tiny primary", type: "button", disabled: dept.busy,
+                title: "把这个部门的全部角色一次加入团队，并按上面的策略配模型",
+                onClick: function () { importDepartment(category); }
+              }, dept.busy ? "加入中…" : "＋ 整部门加入")
+            : null
         ),
         h("div", { className: "ats-cats" },
           chips.map(function (chip) {
@@ -3233,7 +3285,9 @@ window.__ModuleLoader__.load({
       ".tw-root{--dsh-surface:#ffffff;--dsh-text-primary:#111111;--dsh-text-secondary:#555b63;--dsh-border:#dcdfe4;--dsh-accent:#2563eb;--dsh-input-bg:#ffffff;display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;background:#ffffff;color:#111111;}",
       ".tw-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #dcdfe4;flex:0 0 auto;flex-wrap:wrap;background:#f5f6f8;}",
       ".tw-tabs{display:flex;gap:4px;flex:1 1 auto;min-width:0;overflow:auto;}",
-      ".tw-tab{font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid #dcdfe4;background:#eef0f3;color:#111111;cursor:pointer;white-space:nowrap;}",
+      ".tw-tab{font:inherit;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid #dcdfe4;background:#eef0f3;color:#111111;cursor:pointer;white-space:nowrap;}",
+      ".tw-tab{min-width:44px;height:36px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;}",
+      ".tw-tab .tw-tab-icon{font-size:19px;line-height:1;display:inline-flex;align-items:center;}",
       ".tw-tab-on{background:#2563eb;border-color:#2563eb;color:#ffffff;font-weight:600;}",
       ".tw-session{font-size:11px;color:#666b73;white-space:nowrap;}",
       ".tw-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;}",

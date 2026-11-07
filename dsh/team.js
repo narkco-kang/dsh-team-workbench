@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.45.0'
+const PLUGIN_VERSION = '2.46.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1196,10 +1196,13 @@ async function roleLibrarySummary() {
 }
 
 /** 从角色库导入成员：只写 roleRef，正文在派发时按需读取，避免 team.json 膨胀。 */
-async function importRoles(store, ids, groupId) {
+async function importRoles(store, ids, groupId, models) {
   const index = await loadRoleIndex()
   const byId = new Map(index.roles.map((role) => [role.id, role]))
   const taken = new Set(store.members.map((member) => member.name))
+  const pool = (Array.isArray(models) ? models : [])
+    .map((entry) => ({ provider: text(entry?.provider), model: text(entry?.model) }))
+    .filter((entry) => entry.provider.length > 0 && entry.model.length > 0)
   const created = []
   for (const id of Array.isArray(ids) ? ids.map(text) : []) {
     const role = byId.get(id)
@@ -1207,13 +1210,15 @@ async function importRoles(store, ids, groupId) {
     if (store.members.length >= MAX_MEMBERS) break
     const name = uniqueName(role.name, taken)
     taken.add(name)
+    const pick = pool.length > 0 ? pool[created.length % pool.length] : null
     const member = normalizeMember({
       name,
       role: role.description.length > 0 ? role.description.slice(0, 48) : role.categoryName,
       emoji: role.emoji,
       color: colorOfName(role.color),
       groupId: text(groupId),
-      roleRef: { library: 'agency-agents-zh', id: role.id, version: index.version }
+      roleRef: { library: 'agency-agents-zh', id: role.id, version: index.version },
+      routes: pick === null ? [] : [{ label: '自动分配', provider: pick.provider, model: pick.model, reasoningEffort: '' }]
     }, store.members.length)
     store.members.push(member)
     created.push(member)
@@ -1600,7 +1605,7 @@ export function apply(ctx, config) {
           const body = await readJson(request)
           if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
           const store = await loadStore()
-          const created = await importRoles(store, body.ids, text(body.groupId))
+          const created = await importRoles(store, body.ids, text(body.groupId), body.models)
           if (created.length === 0) return json({ ok: false, error: '没有可导入的角色（id 不存在或已满员）' }, 400)
           await saveStore(store)
           return json({ ...(await snapshot()), created: created.map((member) => member.id) })
