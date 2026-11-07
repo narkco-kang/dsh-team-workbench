@@ -42,7 +42,11 @@ const DEFAULT_SETTINGS = {
   fallbackWebSpeech: false,
   apiBase: '',
   apiKey: '',
-  apiModel: ''
+  apiModel: '',
+  // 模型校对：识别完再用团队里的某个成员做最小纠错（同音字/错字/漏标点），不改写。
+  reviewEnabled: false,
+  reviewMemberId: '',
+  reviewGlossary: ''
 }
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const TIMEOUT_MS = 120000
@@ -64,7 +68,10 @@ export async function loadSttSettings() {
       provider: PROVIDERS[parsed?.provider] !== undefined ? parsed.provider : (parsed?.mode === 'openai' ? 'custom' : 'local'),
       apiBase: text(parsed?.apiBase) || PROVIDERS[parsed?.provider]?.apiBase || '',
       apiKey: text(parsed?.apiKey),
-      apiModel: text(parsed?.apiModel) || PROVIDERS[parsed?.provider]?.apiModel || ''
+      apiModel: text(parsed?.apiModel) || PROVIDERS[parsed?.provider]?.apiModel || '',
+      reviewEnabled: parsed?.reviewEnabled === true,
+      reviewMemberId: text(parsed?.reviewMemberId),
+      reviewGlossary: text(parsed?.reviewGlossary)
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -83,7 +90,10 @@ export async function saveSttSettings(next) {
     provider: PROVIDERS[next.provider] !== undefined ? next.provider : 'local',
     apiBase: text(next.apiBase),
     apiKey: next.apiKey === undefined ? '' : text(next.apiKey),
-    apiModel: text(next.apiModel)
+    apiModel: text(next.apiModel),
+    reviewEnabled: next.reviewEnabled === true,
+    reviewMemberId: text(next.reviewMemberId),
+    reviewGlossary: text(next.reviewGlossary)
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
   await writeFile(temp, payload, 'utf8')

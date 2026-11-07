@@ -489,6 +489,37 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   return { messages: target.messages, turns, responder, pickedId }
 }
 
+/**
+ * 语音识别的「模型校对」：让团队里的某个成员只做最小纠错（同音字/错字/漏标点），不改写、不回答。
+ * 任何异常都退回原文，绝不让校对环节把用户的话改坏。
+ */
+async function reviewTranscript(ctx, member, raw, glossary, signal) {
+  const lines = [
+    '你是语音识别的校对员。下面是语音识别的原始文本，可能有同音字、错字、漏标点。',
+    '只做最小必要纠正：改错字、补标点、纠正术语；保持原意和口语顺序。',
+    '不要扩写、不要总结、不要回答内容、不要解释、不要翻译。',
+    glossary.trim().length > 0 ? '术语表（优先按这些写法）：' + glossary.trim().slice(0, 500) : '',
+    '只输出纠正后的文本，不要引号、不要前缀。',
+    '原文：',
+    raw
+  ].filter((line) => line.length > 0)
+  const timeout = new Promise((resolve, reject) => {
+    setTimeout(() => reject(new Error('校对超时')), 20000)
+  })
+  const result = await Promise.race([dispatchToMember(ctx, undefined, member, lines.join('\n'), signal), timeout])
+  let value = stripReceipts(text(result.output)).trim()
+  value = value.replace(/^(纠正后(的文本)?|校对(结果|后)?|结果)[:：]\s*/u, '').trim()
+  if (value.length >= 2 && value.startsWith('"')) value = value.slice(1)
+  if (value.length >= 2 && value.endsWith('"')) value = value.slice(0, -1)
+  value = value.replace(/^[“「](.*)[”」]$/su, '$1').trim()
+  if (value.length === 0) return { text: raw, reviewed: false }
+  // 防改写：长度明显膨胀或缩水都不采信。
+  if (value.length > Math.max(raw.length * 2, raw.length + 40) || value.length < raw.length * 0.4) {
+    return { text: raw, reviewed: false }
+  }
+  return { text: value, reviewed: value !== raw }
+}
+
 /** 聊天记录检索：按关键词搜私聊与群聊，可按会话过滤。 */
 export async function searchMessages(query, kind, scopeId, limit) {
   const needle = String(query || '').trim().toLowerCase()
@@ -791,13 +822,27 @@ export function apply(ctx) {
         }
         const bytes = Buffer.from(await request.arrayBuffer())
         const settings = await loadSttSettings()
-        const value = await transcribe(bytes, {
+        let value = await transcribe(bytes, {
           settings,
           filename: url.searchParams.get('filename') || 'speech.webm',
           contentType: type || 'audio/webm',
           durationMs: Number(url.searchParams.get('ms') || 0)
         })
-        return json({ ok: true, text: value })
+        let reviewed = false
+        if (settings.reviewEnabled && text(settings.reviewMemberId).length > 0 && value.length > 0) {
+          const store = await loadStore()
+          const reviewer = store.members.find((member) => member.id === settings.reviewMemberId && member.enabled !== false)
+          if (reviewer !== undefined) {
+            try {
+              const result = await reviewTranscript(ctx, reviewer, value, settings.reviewGlossary, request.signal)
+              value = result.text
+              reviewed = result.reviewed
+            } catch (error) {
+              console.warn('[team-workbench] 语音校对失败，保留原文：' + String(error))
+            }
+          }
+        }
+        return json({ ok: true, text: value, reviewed })
       } catch (error) {
         return json({ ok: false, error: String(error && error.message ? error.message : error) }, 500)
       }
