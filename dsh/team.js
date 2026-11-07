@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.66.1'
+const PLUGIN_VERSION = '2.67.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1629,6 +1629,46 @@ async function applyMemberAction(store, body, ctx) {
     store.members = store.members.filter((m) => !ids.includes(m.id))
     if (ids.includes(store.chiefId)) store.chiefId = ''
     store.members.push(dept)
+    return null
+  }
+
+  // 清理失效模型：宿主目录里已经不存在（provider/model 失配）的路由直接删，子智能体模型置空。
+  if (action === 'models-clean') {
+    const llm = ctx.get('llm')
+    if (llm === undefined || llm === null) return 'llm 服务不可用'
+    const known = new Set()
+    let providers = []
+    try { providers = llm.listProviders() } catch { return '无法枚举 provider' }
+    for (const provider of providers) {
+      const id = text(provider?.provider ?? provider?.id)
+      if (id.length === 0) continue
+      try {
+        for (const model of await llm.listModels(id)) {
+          const modelId = text(model?.id)
+          if (modelId.length > 0) known.add(id + '/' + modelId)
+        }
+      } catch { /* 跳过 */ }
+    }
+    if (known.size === 0) return '目录为空，未做清理'
+    let removedRoutes = 0
+    let clearedSubs = 0
+    for (const member of store.members) {
+      const before = (member.routes || []).length
+      member.routes = (member.routes || []).filter((route) => known.has(route.provider + '/' + route.model))
+      removedRoutes += before - member.routes.length
+      if (member.department !== null && member.department !== undefined) {
+        member.department = {
+          name: member.department.name,
+          subAgents: member.department.subAgents.map((sub) => {
+            if (sub.provider.length === 0 || sub.model.length === 0) return sub
+            if (known.has(sub.provider + '/' + sub.model)) return sub
+            clearedSubs += 1
+            return Object.assign({}, sub, { provider: '', model: '' })
+          })
+        }
+      }
+    }
+    store.updatedAt = new Date().toISOString()
     return null
   }
 
