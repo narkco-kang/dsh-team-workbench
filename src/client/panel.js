@@ -272,6 +272,11 @@ window.__ModuleLoader__.load({
       ".ats-mascot.sleeping .ats-mascot-eyes{animation:none;transform:scaleY(.12);}",
       "@keyframes ats-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.2px)}}",
       "@keyframes ats-blink{0%,92%,100%{transform:scaleY(1)}94%,96%{transform:scaleY(.08)}}",
+      "@keyframes ats-poke{0%{transform:scale(1)}30%{transform:scale(.86,1.12)}65%{transform:scale(1.08,.93)}100%{transform:scale(1)}}",
+      "@keyframes ats-spin{to{transform:rotate(360deg)}}",
+      ".ats-mascot.poked .ats-mascot-bob{animation:ats-poke .5s cubic-bezier(.3,1.6,.4,1);}",
+      ".ats-mascot .ats-mascot-ring{transform-box:fill-box;transform-origin:center;animation:ats-spin 1.6s linear infinite;}",
+      ".ats-mascot:hover .ats-mascot-bob{animation-duration:1.6s;}",
       "@media (max-width:720px){.ats-grid{grid-template-columns:1fr;}.tw-title{display:none;}}",
     ].join("\n");
     //#region 宿主通信    //#region 宿主通信
@@ -449,15 +454,17 @@ window.__ModuleLoader__.load({
     }
 
     var MASCOT_SHAPES = [
-      { kind: "rect", node: function (id) { return h("rect", { x: 10, y: 10, width: 44, height: 46, rx: 16, fill: "url(#" + id + ")" }); } },
-      { kind: "circle", node: function (id) { return h("circle", { cx: 32, cy: 34, r: 23, fill: "url(#" + id + ")" }); } },
-      { kind: "blob", node: function (id) { return h("path", { d: "M32 9c14 0 24 9 24 23 0 13-9 23-24 23S8 45 8 32C8 18 18 9 32 9z", fill: "url(#" + id + ")" }); } },
-      { kind: "hex", node: function (id) { return h("path", { d: "M32 9l20 11.5v23L32 55 12 43.5v-23z", fill: "url(#" + id + ")" }); } }
+      { kind: "squircle", eyes: 0, node: function (id) { return h("rect", { x: 9, y: 9, width: 46, height: 46, rx: 14, fill: "url(#" + id + ")" }); } },
+      { kind: "circle", eyes: 0, node: function (id) { return h("circle", { cx: 32, cy: 33, r: 23, fill: "url(#" + id + ")" }); } },
+      { kind: "blob", eyes: 0, node: function (id) { return h("path", { d: "M32 8c15 0 25 9 25 24 0 14-10 24-25 24S7 46 7 32C7 17 17 8 32 8z", fill: "url(#" + id + ")" }); } },
+      { kind: "star", eyes: 2, node: function (id) { return h("path", { d: "M32 5l6.8 17.9L58 25.6 43.4 37.2 48.2 56 32 45.2 15.8 56l4.8-18.8L6 25.6l19.2-2.7z", fill: "url(#" + id + ")" }); } },
+      { kind: "drop", eyes: 0, node: function (id) { return h("path", { d: "M32 6c9.5 10 18 17.5 18 27a18 18 0 11-36 0C14 23.5 22.5 16 32 6z", fill: "url(#" + id + ")" }); } },
+      { kind: "diamond", eyes: 2, node: function (id) { return h("path", { d: "M32 7l20 25-20 25L12 32z", fill: "url(#" + id + ")" }); } }
     ];
 
     /**
-     * 动态表情：按成员 id 稳定生成一个会呼吸/眨眼的小角色，
-     * 配色来自成员颜色，右下角带成员 emoji 徽章。
+     * 动态表情：按成员 id 稳定生成一张会呼吸、眨眼、被戳会弹一下的小脸，
+     * 造型与表情参考 DS-Bot 的 BotMark（渐变身体 + 挖空眼 + 腮红 + 状态徽标）。
      */
     function Mascot(props) {
       var member = props.member;
@@ -467,42 +474,56 @@ window.__ModuleLoader__.load({
       var seed = hashOf(member.id || member.name || member.emoji || "m");
       var shape = MASCOT_SHAPES[seed % MASCOT_SHAPES.length];
       var gradientId = "atg" + seed.toString(36);
-      var eyeGap = seed % 3;
-      var leftX = 24 - eyeGap;
-      var rightX = 40 + eyeGap;
-      var blink = "ats-mascot-eyes";
+      var pokeState = useState(false);
+      var poked = pokeState[0];
+      var setPoked = pokeState[1];
+      var narrow = shape.eyes > 0;
+      var eyeGap = narrow ? 3 : seed % 3;
+      var leftX = narrow ? 27 : 24 - eyeGap;
+      var rightX = narrow ? 37 : 40 + eyeGap;
+      var eyeRx = narrow ? 4.6 : 6.2;
+      var eyeRy = narrow ? 5.4 : 7;
+      var mouth = seed % 4;
+      var mouthNode = mouth === 0
+        ? h("path", { d: "M26 45q6 4 12 0", stroke: "#1f2937", strokeWidth: 1.9, strokeLinecap: "round", fill: "none", opacity: 0.7 })
+        : mouth === 1
+          ? h("circle", { cx: 32, cy: 45.5, r: 2.4, fill: "#1f2937", opacity: 0.62 })
+          : mouth === 2
+            ? h("path", { d: "M27 45h10", stroke: "#1f2937", strokeWidth: 1.9, strokeLinecap: "round", opacity: 0.6 })
+            : h("path", { d: "M27 44q2.5 5 5 0q2.5 5 5 0", stroke: "#1f2937", strokeWidth: 1.7, strokeLinecap: "round", fill: "none", opacity: 0.65 });
       return h("svg", {
-        className: "ats-mascot " + state,
+        className: "ats-mascot " + state + (poked ? " poked" : ""),
         width: size, height: size, viewBox: "0 0 64 64",
         role: "img", "aria-label": member.name,
-        style: { flex: "0 0 auto", display: "block" }
+        style: { flex: "0 0 auto", display: "block", cursor: "pointer", overflow: "visible" },
+        onClick: function () { setPoked(true); },
+        onAnimationEnd: function (event) { if (event.animationName && event.animationName.indexOf("ats-poke") >= 0) setPoked(false); }
       },
         h("defs", null,
-          h("linearGradient", { id: gradientId, x1: "0", y1: "0", x2: "0.4", y2: "1" },
+          h("linearGradient", { id: gradientId, x1: "16", y1: "8", x2: "48", y2: "56", gradientUnits: "userSpaceOnUse" },
             h("stop", { offset: "0%", stopColor: accent }),
-            h("stop", { offset: "100%", stopColor: shade(accent, 0.55) })
+            h("stop", { offset: "100%", stopColor: shade(accent, 0.5) })
           )
         ),
         h("g", { className: "ats-mascot-bob" },
           shape.node(gradientId),
-          h("ellipse", { cx: 23, cy: 21, rx: 8, ry: 4, fill: "#fff", opacity: 0.18 }),
-          (seed % 2 === 0)
-            ? h("path", { d: "M32 10V4", stroke: shade(accent, 0.6), strokeWidth: 2, strokeLinecap: "round" })
+          h("ellipse", { cx: 22, cy: 19, rx: 8, ry: 4, fill: "#fff", opacity: 0.16 }),
+          state === "working"
+            ? h("circle", { className: "ats-mascot-ring", cx: 32, cy: 33, r: 27, fill: "none", stroke: "#fbbf24", strokeWidth: 2.4, strokeDasharray: "7 9", strokeLinecap: "round" })
             : null,
-          (seed % 2 === 0) ? h("circle", { cx: 32, cy: 3.4, r: 2.4, fill: "#fbbf24" }) : null,
-          h("g", { className: blink },
-            h("ellipse", { cx: leftX, cy: 34, rx: 6.2, ry: 7, fill: "#fff" }),
-            h("ellipse", { cx: rightX, cy: 34, rx: 6.2, ry: 7, fill: "#fff" }),
-            h("circle", { cx: leftX + 0.6, cy: 35, r: 3.1, fill: "#1f2937" }),
-            h("circle", { cx: rightX + 0.6, cy: 35, r: 3.1, fill: "#1f2937" }),
-            h("circle", { cx: leftX + 1.6, cy: 33.8, r: 1.1, fill: "#fff" }),
-            h("circle", { cx: rightX + 1.6, cy: 33.8, r: 1.1, fill: "#fff" })
+          h("g", { className: "ats-mascot-eyes" },
+            h("ellipse", { cx: leftX, cy: 34, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
+            h("ellipse", { cx: rightX, cy: 34, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
+            h("circle", { cx: leftX + 0.6, cy: 35, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
+            h("circle", { cx: rightX + 0.6, cy: 35, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
+            h("circle", { cx: leftX + 1.6, cy: 33.6, r: 1.05, fill: "#fff" }),
+            h("circle", { cx: rightX + 1.6, cy: 33.6, r: 1.05, fill: "#fff" })
           ),
-          (seed % 3 === 0)
-            ? h("path", { d: "M27 45q5 3 10 0", stroke: "#1f2937", strokeWidth: 1.8, strokeLinecap: "round", fill: "none", opacity: 0.75 })
-            : h("circle", { cx: 32, cy: 45, r: 2.2, fill: "#1f2937", opacity: 0.6 }),
-          h("circle", { cx: 51, cy: 52, r: 8, fill: "#fff", opacity: 0.9 }),
-          h("text", { x: 51, y: 52, textAnchor: "middle", dominantBaseline: "central", fontSize: 10 }, member.emoji || "🤖")
+          h("ellipse", { cx: narrow ? 21 : 19, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
+          h("ellipse", { cx: narrow ? 43 : 45, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
+          mouthNode,
+          h("circle", { cx: 50, cy: 52, r: 7.4, fill: "#fff", opacity: 0.94 }),
+          h("text", { x: 50, y: 52, textAnchor: "middle", dominantBaseline: "central", fontSize: 8.6 }, member.emoji || "🤖")
         )
       );
     }
