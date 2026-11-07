@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.83.1 — 2026-11-08
+
+- 急修：2.83.0 给成员加了 sourcePlatform 但没在 MEMBER_SCHEMA 声明，
+  导致 agent_team_roster 整个返回值被宿主校验拒绝（名册读不出来）；
+- 补声明，并新增 schema-guard 测试：成员字段必须全部在 MEMBER_SCHEMA 里。
+
 ## 2.83.0 — 2026-11-08
 
 参考 Grok Bot 的引擎发现，给本机 bot 补能力画像：
