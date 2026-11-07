@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.80.3 — 2026-11-08
+
+- 修部门派发崩溃：runDepartmentMember 各返回路径补 attempts，工具层对缺失再兜底空数组
+  （此前 "Cannot read properties of undefined (reading map)"，模型已产出却被丢弃）；
+- 行为助推引擎 qwen3.7-max → qwen3.8-flash（实测同句 50s vs 5s）。
+
 ## 2.80.2 — 2026-11-08
 
 - 修「SubagentError: subagent already exists」：宿主在子会话仍登记时拒绝复用固定 childId，

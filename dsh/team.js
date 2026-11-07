@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.80.2'
+const PLUGIN_VERSION = '2.80.3'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -703,7 +703,7 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
   if (plainTask.length > 0 && plainTask.length <= 40 && !plainTask.includes('\n')) {
     const direct = await dispatchToMember(ctx, parent, member, task, signal)
     const answer = text(direct.output)
-    return { text: answer, output: answer, stopReason: direct.stopReason, detail: direct.detail, provider: direct.provider, model: direct.model, picks: [] }
+    return { text: answer, output: answer, stopReason: direct.stopReason, detail: direct.detail, provider: direct.provider, model: direct.model, attempts: direct.attempts ?? [], picks: [] }
   }
 
   let picks = []
@@ -732,7 +732,7 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
     ].filter((line) => line.length > 0).join('\n')
     try {
       const result = await dispatchToMember(ctx, parent, target, prompt, signal)
-      return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed' }
+      return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed', attempts: result.attempts ?? [] }
     } catch (error) {
       return { name: sub.name, text: '', ok: false, error: String(error) }
     }
@@ -742,12 +742,12 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
   if (usable.length === 0) {
     const reasons = outcomes.slice(0, 3).map((entry) => entry.name + '：' + text(entry.error ?? '无输出').slice(0, 80)).join('；')
     const message = '部门里没有子智能体跑通（' + String(outcomes.length) + ' 个全部失败）。' + (reasons.length > 0 ? ' 原因：' + reasons : ' 请检查它们的模型配置。')
-    return { text: message, output: message, stopReason: 'completed', detail: '', provider: '', model: '' }
+    return { text: message, output: message, stopReason: 'completed', detail: '', provider: '', model: '', attempts: [], picks }
   }
   // 只选中 1 个子智能体时，它的结论本身就是答案，再让主管汇总只是多一次往返。
   if (usable.length === 1) {
     const only = usable[0]
-    return { text: only.text, output: only.text, stopReason: 'completed', detail: '', provider: '', model: '', picks }
+    return { text: only.text, output: only.text, stopReason: 'completed', detail: '', provider: '', model: '', attempts: only.attempts ?? [], picks }
   }
   const digest = usable.map((entry) => '【' + entry.name + '】\n' + entry.text).join('\n\n')
   const synthPrompt = [
@@ -765,7 +765,7 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
   const looksLikePlan = /"picks"\s*:/.test(finalText) && finalText.trim().slice(0, 1) === '{'
   const answer = looksLikePlan ? digest : finalText
   // 同时给 text 与 output：部门派发既被聊天用（读 text），也被 agent_team_task 用（读 output）。
-  return { text: answer, output: answer, stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model }
+  return { text: answer, output: answer, stopReason: synth.stopReason, detail: synth.detail, provider: synth.provider, model: synth.model, attempts: synth.attempts ?? [], picks }
 }
 
 /** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
@@ -1131,7 +1131,7 @@ function registerTools(ctx) {
         stopReason: result.stopReason,
         output: result.output,
         detail: result.detail,
-        attempts: result.attempts.map((a) => ({ route: a.route, ok: a.ok, stopReason: a.stopReason, detail: a.detail ?? '' }))
+        attempts: (result.attempts ?? []).map((a) => ({ route: a.route, ok: a.ok, stopReason: a.stopReason, detail: a.detail ?? '' }))
       }
     }
   }
