@@ -599,7 +599,12 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     if (target.progress.parallel.length < 2) target.progress.current = member.name
     else target.progress.current = ''
     await persist()
-    const raw = await runMember(ctx, parent, member, prompt, signal)
+    // 短消息（≤40 字）直接由该成员自己回答，跳过部门「选人→并行→汇总」，
+    // 否则一条「OK」也要经历 3 次模型往返。
+    const shortAsk = text(userText).trim().length > 0 && text(userText).trim().length <= 40 && !text(userText).includes('\n')
+    const raw = shortAsk && member.department !== null && member.department !== undefined
+      ? await dispatchToMember(ctx, parent, member, prompt, signal)
+      : await runMember(ctx, parent, member, prompt, signal)
     const reply = { ...raw, text: stripReceipts(raw.text) }
     step.phase = 'done'
     step.ms = Date.now() - Date.parse(step.startedAt)
