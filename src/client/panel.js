@@ -183,12 +183,12 @@ window.__ModuleLoader__.load({
       ".bt-side:not(.bt-rail)>.bt-list::-webkit-scrollbar-thumb{border:4px solid transparent;border-radius:6px;background:color-mix(in srgb,var(--bt-ink) 16%,transparent) padding-box}",
       ".bt-side:not(.bt-rail)>.bt-list:hover::-webkit-scrollbar-thumb{background-color:color-mix(in srgb,var(--bt-ink) 30%,transparent)}",
       ".bt-people{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:2px 0 4px;}",
-      ".bt-person{display:flex;flex-direction:column;align-items:center;gap:5px;padding:9px 6px 8px;border:0;border-radius:14px;background:transparent;cursor:pointer;box-sizing:border-box;width:100%;transition:background-color .12s ease;}",
+      ".bt-person{display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 4px 6px;border:0;border-radius:14px;background:transparent;cursor:pointer;box-sizing:border-box;width:100%;transition:background-color .12s ease;}",
       ".bt-person:hover{background:var(--bt-hover);}",
       ".bt-person[aria-current=page]{background:var(--bt-active);}",
-      ".bt-person-name{max-width:100%;font-family:inherit;font-size:12px;line-height:16px;color:var(--bt-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;padding:0;cursor:pointer;display:inline-flex;align-items:center;gap:3px;}",
+      ".bt-person-name{max-width:100%;font-family:inherit;font-size:10.5px;line-height:14px;color:var(--bt-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;border:0;padding:0;cursor:pointer;display:inline-flex;align-items:center;gap:3px;}",
       ".bt-person-name:hover{text-decoration:underline;}",
-      ".bt-person-mark{width:44px;height:44px;padding:0;border:0;background:transparent;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;transition:transform .12s ease;}",
+      ".bt-person-mark{width:54px;height:54px;padding:0;border:0;background:transparent;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;transition:transform .12s ease;}",
       ".bt-person-mark:hover{transform:scale(1.06);}",
       ".ats-mascot{filter:drop-shadow(0 1.5px 2px rgba(15,23,42,.22));}",
       ".ats-mascot g[filter] > :is(rect,circle,path,ellipse){stroke:rgba(255,255,255,.34);stroke-width:.9;stroke-linejoin:round;}",
@@ -699,13 +699,14 @@ window.__ModuleLoader__.load({
           state === "working"
             ? h("circle", { className: "ats-mascot-ring", cx: 32, cy: 33, r: 27, fill: "none", stroke: "#fbbf24", strokeWidth: 2.4, strokeDasharray: "7 9", strokeLinecap: "round" })
             : null,
-          h("g", { className: "ats-mascot-eyes" },
-            h("ellipse", { cx: leftX, cy: 34, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
-            h("ellipse", { cx: rightX, cy: 34, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
-            h("circle", { cx: leftX + 0.6, cy: 35, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
-            h("circle", { cx: rightX + 0.6, cy: 35, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
-            h("circle", { cx: leftX + 1.6, cy: 33.6, r: 1.05, fill: "#fff" }),
-            h("circle", { cx: rightX + 1.6, cy: 33.6, r: 1.05, fill: "#fff" })
+          // 仰视 + 侧身：眼白整体逆时针歪 8°，瞳孔抬高并往右偏，像侧着身抬头往上看。
+          h("g", { className: "ats-mascot-eyes", transform: "rotate(-8 32 37)" },
+            h("ellipse", { cx: leftX, cy: 33.6, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
+            h("ellipse", { cx: rightX, cy: 33.6, rx: eyeRx, ry: eyeRy, fill: "#fff" }),
+            h("circle", { cx: leftX + 1.6, cy: 31.6, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
+            h("circle", { cx: rightX + 1.6, cy: 31.6, r: narrow ? 2.3 : 3.1, fill: "#1f2937" }),
+            h("circle", { cx: leftX + 2.5, cy: 30.3, r: 1.05, fill: "#fff" }),
+            h("circle", { cx: rightX + 2.5, cy: 30.3, r: 1.05, fill: "#fff" })
           ),
           h("ellipse", { cx: narrow ? 21 : 19, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
           h("ellipse", { cx: narrow ? 43 : 45, cy: 43.5, rx: 4, ry: 2.2, fill: "#fb7185", opacity: 0.32 }),
@@ -2118,7 +2119,7 @@ window.__ModuleLoader__.load({
             "aria-label": m.name + " 属性页",
             onClick: function () { if (props.onEditMember) props.onEditMember(m.memberId); }
           },
-            h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOfMember(m), size: 44, state: working ? "working" : "idle" })
+            h(Avatar, { member: { id: m.memberId, name: m.name, emoji: m.emoji, color: m.color, enabled: true }, accent: colorOfMember(m), size: 54, state: working ? "working" : "idle" })
           )
         );
       };
