@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.72.5'
+const PLUGIN_VERSION = '2.73.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -552,7 +552,8 @@ async function withRoleInstructions(member) {
   try {
     const body = await loadRoleBody(member.roleRef.id)
     if (body.trim().length === 0) return member
-    return { ...member, instructions: body }
+    // 角色正文常有上万字，整段注入会让首 token 慢很多；截到 1500 字保留风格与边界即可。
+    return { ...member, instructions: body.trim().slice(0, 1500) }
   } catch {
     return member
   }
@@ -643,10 +644,13 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
   ].join('\n')
 
   let picks = []
-  try {
-    const plan = await dispatchToMember(ctx, parent, member, planPrompt, signal)
-    picks = parsePicks(plan.output, subs)
-  } catch { /* 主管挑人失败就用字面匹配兜底 */ }
+  // 子智能体不超过 4 个时直接按关键词选人，省掉一次主管排期调用（通常 4–30 秒）。
+  if (subs.length > 4) {
+    try {
+      const plan = await dispatchToMember(ctx, parent, member, planPrompt, signal)
+      picks = parsePicks(plan.output, subs)
+    } catch { /* 主管挑人失败就用字面匹配兜底 */ }
+  }
   if (picks.length === 0) picks = keywordPicks(task, subs)
 
   const outcomes = await Promise.all(picks.map(async (pick) => {
@@ -734,9 +738,11 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
   let last = null
   for (const route of candidates) {
     const started = Date.now()
+    // 单条路由 45 秒还没出结果就换下一条（慢模型不该把整轮拖到分钟级）。
+    const bounds = signal !== undefined && signal !== null ? AbortSignal.any([signal, AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000)
     let result
     try {
-      result = await runOnRoute(ctx, parent, member, route, task, signal)
+      result = await runOnRoute(ctx, parent, member, route, task, bounds)
     } catch (error) {
       result = { childSessionId: '', stopReason: 'error', output: '', detail: String(error) }
     }
