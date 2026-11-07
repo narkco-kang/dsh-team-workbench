@@ -290,17 +290,17 @@ window.__ModuleLoader__.load({
       ".ats-bubble.user .ats-bubble-text{background:var(--dsh-accent,#2563eb);color:#fff;}",
       /* 输入框照 DS-Bot / DSH 会话页：居中卡片、max-width 820、圆角 16、
          文本 14/20，底部一行「＋ / 🎤 …… 发送」。 */
-      ".ats-compose{flex:0 0 auto;display:flex;justify-content:center;padding:10px 16px 14px;background:var(--bt-main);}",
-      ".ats-composer{display:flex;flex-direction:column;gap:6px;width:100%;max-width:820px;box-sizing:border-box;padding:10px 12px 8px;border:1px solid var(--bt-line-2);border-radius:16px;background:var(--bt-card);box-shadow:0 1px 2px rgba(0,0,0,.04);transition:border-color .12s ease,box-shadow .12s ease;}",
-      ".ats-composer:focus-within{border-color:var(--bt-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--bt-accent) 14%,transparent);}",
-      ".ats-composer .ats-area{width:100%;min-height:44px;max-height:200px;overflow-y:auto;resize:none;padding:2px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:20px;color:var(--bt-ink);outline:none;box-shadow:none;}",
+      ".ats-compose{flex:0 0 auto;display:flex;justify-content:center;padding:20px 24px 64px;background:var(--bt-main);}",
+      ".ats-composer{display:flex;flex-direction:column;gap:10px;width:100%;max-width:1000px;box-sizing:border-box;padding:16px 18px 12px;border:1px solid var(--bt-line-2);border-radius:20px;background:var(--bt-card);box-shadow:0 2px 10px -2px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);transition:border-color .12s ease,box-shadow .12s ease;}",
+      ".ats-composer:focus-within{border-color:var(--bt-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--bt-accent) 14%,transparent),0 2px 10px -2px rgba(0,0,0,.06);}",
+      ".ats-composer .ats-area{width:100%;min-height:64px;max-height:280px;overflow-y:auto;resize:none;padding:4px;border:0;border-radius:0;background:transparent;font-size:15px;line-height:22px;color:var(--bt-ink);outline:none;box-shadow:none;}",
       ".ats-composer .ats-area::placeholder{color:var(--bt-ink-3);}",
       ".ats-composer .ats-area:disabled{opacity:.6;}",
-      ".ats-composer-bar{display:flex;align-items:center;gap:6px;}",
-      ".ats-round{width:32px;height:32px;flex:0 0 auto;border-radius:50%;border:1px solid var(--bt-line);background:transparent;color:var(--bt-ink);font:inherit;font-size:16px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}",
+      ".ats-composer-bar{display:flex;align-items:center;gap:8px;}",
+      ".ats-round{width:38px;height:38px;flex:0 0 auto;border-radius:50%;border:1px solid var(--bt-line);background:transparent;color:var(--bt-ink);font:inherit;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}",
       ".ats-round:hover{background:var(--bt-hover);}",
       ".ats-round.recording{color:#dc2626;border-color:rgba(220,38,38,.5);}",
-      ".ats-send{height:32px;padding:0 16px;border-radius:999px;border:0;background:var(--bt-accent);color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}",
+      ".ats-send{height:38px;padding:0 20px;border-radius:999px;border:0;background:var(--bt-accent);color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;}",
       ".ats-send:hover{filter:brightness(1.05);}",
       ".ats-send:disabled{background:var(--bt-active);color:var(--bt-ink-3);cursor:default;filter:none;}",
       ".ats-check-list{display:flex;flex-wrap:wrap;gap:6px 12px;max-height:120px;overflow:auto;margin:6px 0;}",
@@ -1473,7 +1473,7 @@ window.__ModuleLoader__.load({
         var el = areaRef.current;
         if (!el) return;
         el.style.height = "auto";
-        el.style.height = Math.min(200, Math.max(44, el.scrollHeight)) + "px";
+        el.style.height = Math.min(280, Math.max(64, el.scrollHeight)) + "px";
       }, [draft, target]);
 
       var toggleVoice = function () {
@@ -1761,7 +1761,7 @@ window.__ModuleLoader__.load({
                 onInput: function (e) {
                   var el = e.target;
                   el.style.height = "auto";
-                  el.style.height = Math.min(200, Math.max(44, el.scrollHeight)) + "px";
+                  el.style.height = Math.min(280, Math.max(64, el.scrollHeight)) + "px";
                 },
                 onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
               }),
