@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.72.4 — 2026-11-08
+
+- 名册（agent_team_roster）的 department.subAgents 现在带 routes 数组（由 provider/model 生成），
+  避免调用方按 routes 判断时误读为「未配模型 / 无法复核」。
+
 ## 2.72.3 — 2026-11-08
 
 - 子智能体新增失败自动回退：主路由失败后依次尝试 deepseek-flash / deepseek-v4-pro，

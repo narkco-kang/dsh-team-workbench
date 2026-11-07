@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.72.3'
+const PLUGIN_VERSION = '2.72.4'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -949,7 +949,20 @@ function registerTools(ctx) {
       }
       const members = store.members.map((member) => {
         const copy = Object.assign({}, member)
-        if (copy.department === null || copy.department === undefined) delete copy.department
+        if (copy.department === null || copy.department === undefined) {
+          delete copy.department
+          return copy
+        }
+        // 子智能体也给出 routes：很多调用方按 routes 判断"有没有配模型"，
+        // 只给 provider/model 会被误读成"未配置"。
+        copy.department = {
+          name: copy.department.name,
+          subAgents: copy.department.subAgents.map((sub) => Object.assign({}, sub, {
+            routes: sub.provider.length > 0 && sub.model.length > 0
+              ? [{ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
+              : []
+          }))
+        }
         return copy
       })
       return { count: store.members.length, pluginVersion: PLUGIN_VERSION, chiefId: store.chiefId || '', groups: store.groups, members }
