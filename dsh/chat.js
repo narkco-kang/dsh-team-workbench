@@ -727,6 +727,7 @@ export async function applyRoomAction(body) {
     target.messages = target.messages.concat(source.messages || [])
     target.updatedAt = new Date().toISOString()
     chats.rooms = chats.rooms.filter((room) => room.id !== sourceId)
+    await saveChats(chats)
     return { ok: true, target: target.id, moved: merged.length, messages: (source.messages || []).length }
   }
 

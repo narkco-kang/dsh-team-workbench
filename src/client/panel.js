@@ -2806,6 +2806,12 @@ window.__ModuleLoader__.load({
       var setDragRoomId = dragRoomState[1];
       var mergeRoom = function (room) {
         if (dragRoomId.length === 0 || dragRoomId === room.id || dropBusy) return;
+        var sourceRoom = rooms.filter(function (item) { return item.id === dragRoomId; })[0];
+        if (sourceRoom !== undefined && sourceRoom.chief === true) {
+          setDragRoomId("");
+          setBanner("总管群由系统维护（成员自动=全员、总管自动=管理员），不能作为合并源；可以把别的群并入它。");
+          return;
+        }
         setDropBusy(true);
         postChatRoom({ action: "merge", sourceId: dragRoomId, targetId: room.id })
           .then(function (payload) {
