@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.12.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.13.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -46,17 +46,17 @@
 
 ## 安装
 
-2.12.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.13.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.12.0.tgz
+  plugin --profile web add ./dsh-team-workbench-2.13.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.12.0/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.13.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -66,7 +66,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.12.0**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.13.0**，否则两套入口会同时存在。
 
 ## 包结构
 
@@ -106,8 +106,10 @@ agent_team_roles、agent_team_chat、agent_team_group_chat，以及技能库的 
   - L0 原始对话 = `chats.json`；L1 原子事实 = `atoms[]`（带 `key` / 重要度 / 来源消息）；
   - L2 场景摘要 = `l2.summary`；L3 用户画像 = 跨会话共享的 `persona.items[]`；
   - 同一 `key` 的新事实覆盖旧的；同文本与 Jaccard ≥ 0.8 的近重复不入库；L1 上限 40 条按 BM25 分数淘汰，L3 上限 12 条；
-  - 召回是 **BM25**（中文二元组切词 + IDF + 长度归一，去停用词）+ 同义词扩展 + key 权重加倍
-    + 重要度 + 30 天时间衰减 + 访问强化（hits）；
+  - 召回是 **BM25 + 向量混合**：BM25（中文二元组 + IDF + 长度归一 + 去停用词 + 同义词扩展 + key 权重）
+    与 embedding 余弦各出一份排名，用 RRF 融合；关键词一个都没命中时直接用向量排序；
+  - embedding 默认走本机 Ollama（`http://127.0.0.1:11434/v1`，模型 `qwen3-embedding:0.6b`，1024 维），
+    也可在记忆面板里换成任意 OpenAI 兼容端点；向量缓存在 `memory-vectors.json`，不可用时自动退回 BM25；
   - 每 12 条新消息由负责人压缩一次（后台执行）；提示词只注入**画像 + 场景 + 按当前消息打分的前 6 条事实**，
     其余留在文件里，从「记忆」面板检索（`GET /memory?q=`）或记录检索下钻。
 - **记忆面板**：聊天头部「记忆」按 L3 / L2 / L1 分层展示，可删画像、删事实、手动记一条、清空。
@@ -121,6 +123,8 @@ agent_team_roles、agent_team_chat、agent_team_group_chat，以及技能库的 
 | 团队配置（成员 / 分组 / 头像引用） | $DSH_HOME/agent-team-studio/team.json（v3） |
 | 私聊 / 群聊记录 | $DSH_HOME/team-workbench/chats.json |
 | 会话长期记忆（L1 事实 / L2 场景 / L3 画像） | $DSH_HOME/team-workbench/memory.json（v2） |
+| 记忆向量缓存 | $DSH_HOME/team-workbench/memory-vectors.json |
+| embedding 设置 | $DSH_HOME/team-workbench/memory-settings.json |
 | 上传的头像文件 | $DSH_HOME/team-workbench/avatars/<sha256>.webp |
 | 技能库 | $DSH_HOME/.skills-src 与各 agent 的 skills |
 

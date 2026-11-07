@@ -23,7 +23,22 @@ import {
   readJson,
   text
 } from './team.js'
-import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, memoryStats, removeAtom, removePersona, saveMemory, searchMemory, slotOf } from './memory.js'
+import {
+  addAtom,
+  addPersona,
+  compactIfNeeded,
+  embedTexts,
+  loadMemory,
+  loadSettings,
+  memoryBlock,
+  memoryStats,
+  removeAtom,
+  removePersona,
+  saveMemory,
+  saveSettings,
+  searchMemoryHybrid,
+  slotOf
+} from './memory.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -240,7 +255,8 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   pushMessage(thread.messages, messageOf('user', null, userText))
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
-  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryBlock(slot, memory.persona, userText)), signal)
+  const memoryText = await memoryBlock(slot, memory.persona, userText)
+  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal)
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
   thread.updatedAt = new Date().toISOString()
   await saveChats(chats)
@@ -329,7 +345,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       if (used.has(member.id)) continue
       used.add(member.id)
       if (turns.length >= MAX_TURNS_PER_MESSAGE) break
-      const memoryText = memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
+      const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
       const prompt = depth === 0 && admin !== undefined && member.id === admin.id
         ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
         : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
@@ -618,11 +634,17 @@ export function apply(ctx) {
           const memory = await loadMemory()
           const q = url.searchParams.get('q') || ''
           if (id.length === 0) {
-            if (q.trim().length === 0) return json({ ok: true, stats: memoryStats(memory), persona: memory.persona, private: memory.private, rooms: memory.rooms })
+            if (q.trim().length === 0) {
+              const settings = await loadSettings()
+              return json({
+                ok: true, stats: memoryStats(memory), persona: memory.persona, private: memory.private, rooms: memory.rooms,
+                settings: { embedding: { ...settings.embedding, key: settings.embedding.key.length > 0 ? '已配置' : '' } }
+              })
+            }
             const store = await loadStore()
             const names = new Map(store.members.map((member) => ['private:' + member.id, member.name]))
             for (const room of (await loadChats()).rooms) names.set('room:' + room.id, room.name)
-            const hits = searchMemory(memory, q, 30).map((row) => ({
+            const hits = (await searchMemoryHybrid(memory, q, 30)).map((row) => ({
               kind: row.kind,
               id: row.id,
               conversationName: names.get(row.kind + ':' + row.id) || row.id,
@@ -647,6 +669,25 @@ export function apply(ctx) {
         }
         const body = await readJson(request)
         if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const actionName = text(body.action) || 'remember'
+        if (actionName === 'settings') {
+          const current = await loadSettings()
+          const incoming = body.embedding !== null && typeof body.embedding === 'object' ? body.embedding : {}
+          await saveSettings({
+            embedding: {
+              enabled: incoming.enabled === undefined ? current.embedding.enabled : incoming.enabled !== false,
+              baseUrl: text(incoming.baseUrl) || current.embedding.baseUrl,
+              model: text(incoming.model) || current.embedding.model,
+              key: incoming.key === '已配置' || incoming.key === undefined ? current.embedding.key : text(incoming.key)
+            }
+          })
+          return json({ ok: true })
+        }
+        if (actionName === 'test') {
+          const settings = await loadSettings()
+          const vectors = await embedTexts(settings, ['连通性测试'])
+          return json({ ok: true, dim: vectors[0].length })
+        }
         const kind = text(body.kind) === 'room' ? 'room' : 'private'
         const id = text(body.id)
         if (id.length === 0) return json({ ok: false, error: '缺少会话 id' }, 400)
