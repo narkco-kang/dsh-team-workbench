@@ -71,10 +71,45 @@ export async function probeStt(settings) {
  * @param {Buffer} bytes 音频字节
  * @param {{ filename?: string, contentType?: string, settings?: object }} options
  */
+/** whisper 在静音/噪声上常见的「幻觉」句子：整句命中就丢掉，避免给用户编一段话。 */
+const HALLUCINATIONS = [
+  /^谢谢(大家)?观看[。！!]?$/u,
+  /^感谢(大家)?观看[。！!]?$/u,
+  /^请不吝点赞[^。]*$/u,
+  /^明镜与点点栏目$/u,
+  /^字幕由[^。]*提供[。]?$/u,
+  /^中文字幕[^。]*$/u,
+  /^关注公众号[^。]*$/u,
+  /^订阅(一下)?频道[^。]*$/u,
+  /^thank(s)? (you )?for watching[.!]?$/iu,
+  /^subtitles? by[^.]*$/iu,
+  /^please subscribe[^.]*$/iu
+]
+
+export function isHallucination(value) {
+  const line = text(value).trim()
+  if (line.length === 0) return true
+  return HALLUCINATIONS.some((pattern) => pattern.test(line))
+}
+
+/** 清掉逐行幻觉；剩下的若都是空白就返回空串（前端会提示「没识别到内容」）。 */
+export function cleanTranscript(value) {
+  return text(value)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isHallucination(line))
+    .join(' ')
+    .trim()
+}
+
 export async function transcribe(bytes, options = {}) {
   const settings = options.settings || await loadSttSettings()
   if (settings.enabled === false) throw new Error('语音识别已关闭')
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error('音频为空')
+  // 太短的录音让 whisper 猜，猜出来的多半是幻觉；宁可让用户重说。
+  const durationMs = Number(options.durationMs)
+  if (Number.isFinite(durationMs) && durationMs > 0 && durationMs < 600) throw new Error('录音太短（不到 1 秒），请按住麦克风说一句')
+  if (bytes.length < 1500) throw new Error('没有录到声音（音频过小），检查麦克风权限后重试')
   if (bytes.length > MAX_AUDIO_BYTES) throw new Error('音频超过 ' + String(Math.round(MAX_AUDIO_BYTES / 1024 / 1024)) + 'MB 上限')
   const base = text(settings.baseUrl).replace(/\/+$/, '')
   const form = new FormData()
@@ -93,7 +128,7 @@ export async function transcribe(bytes, options = {}) {
   try { payload = JSON.parse(raw) } catch { /* 可能是纯文本 */ }
   if (payload !== null && typeof payload === 'object' && 'code' in payload) {
     if (Number(payload.code) !== 0) throw new Error('STT 失败：' + text(payload.msg || raw).slice(0, 200))
-    return text(payload.data).trim()
+    return cleanTranscript(payload.data)
   }
-  return text(raw).trim()
+  return cleanTranscript(raw)
 }

@@ -787,7 +787,8 @@ export function apply(ctx) {
         const value = await transcribe(bytes, {
           settings,
           filename: url.searchParams.get('filename') || 'speech.webm',
-          contentType: type || 'audio/webm'
+          contentType: type || 'audio/webm',
+          durationMs: Number(url.searchParams.get('ms') || 0)
         })
         return json({ ok: true, text: value })
       } catch (error) {

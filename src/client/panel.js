@@ -402,14 +402,15 @@ window.__ModuleLoader__.load({
     function postSttSettings(stt) {
       return fetch("/api/team-workbench/stt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "settings", stt: stt }) }).then(unwrap);
     }
-    function postSttAudio(blob) {
-      return fetch("/api/team-workbench/stt?filename=speech.webm", {
+    function postSttAudio(blob, durationMs) {
+      var query = "?filename=speech.webm" + (durationMs ? "&ms=" + String(Math.round(durationMs)) : "");
+      return fetch("/api/team-workbench/stt" + query, {
         method: "POST",
         headers: { "content-type": blob.type || "audio/webm" },
         body: blob,
         signal: AbortSignal.timeout(150000)
       }).then(function (res) {
-        var type = String(res.headers.get("content-type") || "");
+        var type = String((res.headers && typeof res.headers.get === "function" ? res.headers.get("content-type") : "") || "");
         // 路由没注册时宿主会回 404 + HTML；接口异常时是 JSON {ok:false,error}——两种都要能读出原因。
         if (type.indexOf("json") < 0) {
           if (res.status === 404) throw new Error("语音接口未就绪（重启 Harness 后生效）");
@@ -1572,6 +1573,13 @@ window.__ModuleLoader__.load({
       var recSecondsState = useState(0);
       var recSeconds = recSecondsState[0];
       var setRecSeconds = recSecondsState[1];
+      var recLevelState = useState(0);
+      var recLevel = recLevelState[0];
+      var setRecLevel = recLevelState[1];
+      var audioCtxRef = React.useRef(null);
+      var levelTimerRef = React.useRef(null);
+      var maxRmsRef = React.useRef(0);
+      var recStartedRef = React.useRef(0);
       var sttBusyState = useState(false);
       var sttBusy = sttBusyState[0];
       var setSttBusy = sttBusyState[1];
@@ -1672,19 +1680,50 @@ window.__ModuleLoader__.load({
           setBanner("这个客户端不支持直接录音（MediaRecorder 不可用）；点「语音」可用本地 STT，或在设置里打开回退");
           return;
         }
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+        navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(function (stream) {
+          var track = stream.getAudioTracks()[0];
+          if (track === undefined) { setBanner("麦克风没有音频轨道：检查系统麦克风设备"); stream.getTracks().forEach(function (t) { t.stop(); }); return; }
           var mr = new MediaRecorder(stream);
           recorderRef.current = mr;
           chunksRef.current = [];
           setRecSeconds(0);
+          setRecLevel(0);
+          maxRmsRef.current = 0;
+          recStartedRef.current = Date.now();
+          // 实时音量：既让用户看到「真的收到了声音」，也用来判断这段录音是不是静音。
+          try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            var audioCtx = new AC();
+            var analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 512;
+            audioCtx.createMediaStreamSource(stream).connect(analyser);
+            audioCtxRef.current = audioCtx;
+            var buffer = new Float32Array(analyser.fftSize);
+            levelTimerRef.current = setInterval(function () {
+              analyser.getFloatTimeDomainData(buffer);
+              var sum = 0;
+              for (var i = 0; i < buffer.length; i += 1) sum += buffer[i] * buffer[i];
+              var rms = Math.sqrt(sum / buffer.length);
+              if (rms > maxRmsRef.current) maxRmsRef.current = rms;
+              setRecLevel(Math.min(100, Math.round(rms * 400)));
+            }, 100);
+          } catch (error) { /* 没有 AudioContext 也能继续录音 */ }
           mr.ondataavailable = function (event) { if (event.data && event.data.size > 0) chunksRef.current.push(event.data); };
           mr.onstop = function () {
             stream.getTracks().forEach(function (track) { track.stop(); });
             recorderRef.current = null;
             setMicOn(false);
+            if (levelTimerRef.current !== null) { clearInterval(levelTimerRef.current); levelTimerRef.current = null; }
+            if (audioCtxRef.current !== null) { try { audioCtxRef.current.close(); } catch (error) { /* 已关闭 */ } audioCtxRef.current = null; }
+            var ms = Date.now() - recStartedRef.current;
             var blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+            if (ms < 600) { setBanner("录音太短（" + (ms / 1000).toFixed(1) + "s）：点一下开始，说完再点一下结束"); return; }
+            if (maxRmsRef.current < 0.01) {
+              setBanner("没检测到声音（音量峰值 " + Math.round(maxRmsRef.current * 100) + "%）：检查系统麦克风权限（系统设置 → 隐私与安全性 → 麦克风）和输入设备");
+              return;
+            }
             setSttBusy(true);
-            postSttAudio(blob).then(function (payload) {
+            postSttAudio(blob, ms).then(function (payload) {
               var value = String((payload && payload.text) || "").trim();
               if (value.length === 0) { setBanner("没有识别到内容，换个说法再试一次。"); return; }
               setDraft(function (prev) { return prev.length > 0 ? prev + " " + value : value; });
@@ -2107,7 +2146,8 @@ window.__ModuleLoader__.load({
               h("div", { className: "ats-composer-bar" },
                 h("button", { className: "ats-round", type: "button", title: "新建群聊", "aria-label": "新建群聊", onClick: openForm }, "＋"),
                 h("button", { className: "ats-round" + (micOn ? " recording" : ""), type: "button", title: "语音输入：点一下开始录音，再点一下结束并转写", "aria-label": "语音输入", disabled: sttBusy, onClick: toggleVoice }, micOn ? "●" : "🎤"),
-                micOn ? h("span", { className: "ats-sub", style: { fontSize: "11px" } }, "● 录音 " + String(recSeconds) + "s · 再点结束") : null,
+                micOn ? h("span", { className: "ats-sub", style: { fontSize: "11px" } },
+                  "● 录音 " + String(recSeconds) + "s · 音量 " + String(recLevel) + "% · 再点结束") : null,
                 sttBusy ? h("span", { className: "ats-sub", style: { fontSize: "11px" } }, "识别中…") : null,
                 h("span", { className: "ats-spacer" }),
                 h("button", { className: "ats-send", type: "button", disabled: busy || target === null || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
