@@ -282,12 +282,29 @@ function parseMentions(body, members, exclude) {
 
 async function parentOf(ctx, sessionId) {
   const agents = ctx.get('agents')
-  if (agents === undefined || agents === null || sessionId.length === 0) return undefined
-  try {
-    return agents.get(sessionId)
-  } catch {
-    return undefined
+  if (agents === undefined || agents === null) return undefined
+  if (sessionId.length > 0) {
+    try {
+      const found = agents.get(sessionId)
+      if (found !== undefined && found !== null) return found
+    } catch { /* 会话可能已结束，走回退 */ }
   }
+  // 回退：宿主没把 sessionId 传进来、或传的是已结束的会话时，尽量找当前活跃的智能体，
+  // 否则团队页每次发消息都会报「当前没有活动的智能体」。
+  try { if (typeof agents.current === 'function') { const current = agents.current(); if (current !== undefined && current !== null) return current } } catch { /* 无此 API */ }
+  try {
+    if (typeof agents.list === 'function') {
+      const list = agents.list()
+      if (Array.isArray(list)) {
+        for (const item of list) {
+          const id = text(item?.sessionId ?? item?.id ?? item)
+          if (id.length === 0) continue
+          try { const found = agents.get(id); if (found !== undefined && found !== null) return found } catch { /* 下一个 */ }
+        }
+      }
+    }
+  } catch { /* 无此 API */ }
+  return undefined
 }
 
 async function runMember(ctx, parent, member, prompt, signal) {
@@ -791,7 +808,9 @@ export function apply(ctx) {
     if (userText.length > 4000) return json({ ok: false, error: '消息最长 4000 字' }, 400)
     const sessionId = text(body.sessionId)
     const parent = await parentOf(ctx, sessionId)
-    if (parent === undefined || parent === null) return json({ ok: false, error: '会话 ' + sessionId + ' 当前没有活动的智能体' }, 409)
+    if (parent === undefined || parent === null) {
+      return json({ ok: false, error: '当前没有可用的宿主会话（sessionId="' + (sessionId.length > 0 ? sessionId : '空') + '"）：请先在 DSH 主会话里发一条消息，或刷新页面后再发；也可以到团队页点成员「▶ 试跑」验证模型。' }, 409)
+    }
 
     if (routeKind === 'private') {
       const member = store.members.find((entry) => entry.id === text(body.memberId))
