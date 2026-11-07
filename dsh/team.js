@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.59.0'
+const PLUGIN_VERSION = '2.60.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1462,7 +1462,7 @@ async function applyPresetToStore(store, preset, mode) {
 const ROUTE_ACTIONS = ['route-upsert', 'route-delete', 'route-activate', 'route-reorder']
 
 /** 在 store 上应用一个成员动作；返回错误字符串或 null。 */
-function applyMemberAction(store, body) {
+async function applyMemberAction(store, body, ctx) {
   const action = text(body.action) || 'upsert'
   if (action.startsWith('group-')) return applyGroupAction(store, body)
   const findIndex = (id) => store.members.findIndex((m) => m.id === text(id))
@@ -1515,6 +1515,56 @@ function applyMemberAction(store, body) {
     store.members = store.members.filter((m) => m.id !== id)
     if (store.chiefId === id) store.chiefId = ''
     return store.members.length === before ? '找不到该成员' : null
+  }
+
+  // 自动分配模型：把宿主目录里可解析的模型轮流分给部门子智能体（可选真实推理过滤）。
+  if (action === 'models-auto') {
+    const llm = ctx.get('llm')
+    if (llm === undefined || llm === null) return 'llm 服务不可用，无法自动分配'
+    let providers = []
+    try { providers = llm.listProviders() } catch { return '无法枚举 provider' }
+    const candidates = []
+    for (const provider of providers) {
+      const id = text(provider?.provider ?? provider?.id)
+      if (id.length === 0) continue
+      try {
+        const models = await llm.listModels(id)
+        for (const model of models) {
+          const modelId = text(model?.id)
+          if (modelId.length > 0 && candidates.length < 40) candidates.push({ provider: id, model: modelId })
+        }
+      } catch { /* 单个 provider 失败不影响其它 */ }
+    }
+    if (candidates.length === 0) return '目录里没有可用模型'
+    const usable = []
+    for (const candidate of candidates) {
+      try {
+        const info = await llm.resolveModelInfo(candidate.provider, candidate.model)
+        const modalities = Array.isArray(info.inputModalities) ? info.inputModalities.map(text) : []
+        if (modalities.length > 0 && !modalities.includes('text')) continue
+        await llm.prepareCall({ provider: candidate.provider, model: candidate.model })
+        usable.push(candidate)
+        if (usable.length >= 6) break
+      } catch { /* 跳过不可解析的模型 */ }
+    }
+    if (usable.length === 0) return '没有可解析的模型'
+    const targetId = text(body.memberId)
+    let assigned = 0
+    for (const member of store.members) {
+      if (targetId.length > 0 && member.id !== targetId) continue
+      if (member.department === null || member.department === undefined || member.department.subAgents.length === 0) continue
+      const subs = member.department.subAgents.map((sub, index) => Object.assign({}, sub, {
+        provider: usable[index % usable.length].provider,
+        model: usable[index % usable.length].model
+      }))
+      const lead = usable[0]
+      member.department = { name: member.department.name, subAgents: subs }
+      member.routes = [{ id: 'lead-' + member.id.slice(-6), label: '部门主管', provider: lead.provider, model: lead.model, reasoningEffort: '', enabled: true }]
+      member.activeRouteId = member.routes[0].id
+      assigned += 1
+    }
+    if (assigned === 0) return '没有需要分配的部门'
+    return null
   }
 
   if (action === 'delete-many') {
@@ -1744,7 +1794,7 @@ export function apply(ctx, config) {
       if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
       try {
         const store = await loadStore()
-        const failure = applyMemberAction(store, body)
+        const failure = await applyMemberAction(store, body, ctx)
         if (failure !== null) return json({ ok: false, error: failure }, 400)
         await saveStore(store)
         return json(await snapshot())

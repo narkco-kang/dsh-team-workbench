@@ -2635,6 +2635,7 @@ window.__ModuleLoader__.load({
             onClick: function () { if (bulk.on) toggleBulkId([m.memberId]); else pickPrivate(m.memberId); }
           },
             m.name,
+            (m.subAgentCount || 0) > 0 ? h("span", { className: "bt-tag", title: "部门子智能体数量" }, "🏢" + String(m.subAgentCount)) : null,
             m.memberId === chiefId ? h("span", { className: "bt-tag chief", title: "总管" }, "★") : null
           ),
           h("button", {
@@ -2757,17 +2758,23 @@ window.__ModuleLoader__.load({
       var deptView = deptViewState[0];
       var setDeptView = deptViewState[1];
       // 按部门分组：部门成员的 departmentName 由宿主侧补上（角色库分类或 department.name）。
+      // 只有“多位普通成员同属一个部门”才折叠成部门格子；
+      // 真正的部门智能体（member.department）本身就是一个成员，直接按成员展示。
       var departmentMap = (function () {
         var map = new Map();
         members.forEach(function (m) {
+          if ((m.subAgentCount || 0) > 0) return;
           var name = m.departmentName || "";
           if (name.length === 0) return;
           if (!map.has(name)) map.set(name, []);
           map.get(name).push(m);
         });
+        Array.from(map.keys()).forEach(function (name) { if (map.get(name).length < 2) map.delete(name); });
         return map;
       })();
-      var looseMembers = members.filter(function (m) { return (m.departmentName || "").length === 0; });
+      var groupedIds = new Set();
+      Array.from(departmentMap.values()).forEach(function (list) { list.forEach(function (m) { groupedIds.add(m.memberId); }); });
+      var looseMembers = members.filter(function (m) { return !groupedIds.has(m.memberId); });
       var memberCheck = function (m) {
         var checked = form.memberIds.indexOf(m.memberId) >= 0;
         return h("label", { key: m.memberId, className: "ats-check" },
@@ -2859,6 +2866,36 @@ window.__ModuleLoader__.load({
                     h("span", { className: "ats-dept-view-title" }, "🏢 " + deptView),
                     h("span", { className: "ats-dept-view-sub" }, String(list.length) + " 个子智能体 · 点一个进入它的私聊"),
                     h("span", { className: "ats-spacer" }),
+                    h("button", {
+                      className: "ats-btn tiny primary", type: "button",
+                      title: "把可用模型轮流分配给这个部门的子智能体", "aria-label": "自动分配模型",
+                      onClick: function () {
+                        setBanner("正在自动分配模型…");
+                        fetch("/api/team-workbench/members", {
+                          method: "POST", headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ action: "models-auto" })
+                        }).then(function (res) { return res.json(); }).then(function (payload) {
+                          if (payload.ok === false) throw new Error(payload.error || "分配失败");
+                          setBanner("模型已自动分配。");
+                          loadOverview();
+                        }).catch(function (error) { setBanner("分配失败：" + String(error && error.message ? error.message : error)); });
+                      }
+                    }, "🎲"),
+                    h("button", {
+                      className: "ats-btn tiny", type: "button",
+                      title: "把这个部门的成员合并成一个部门智能体", "aria-label": "合并本部门",
+                      onClick: function () {
+                        fetch("/api/team-workbench/chats/merge", {
+                          method: "POST", headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ name: deptView })
+                        }).then(function (res) { return res.json(); }).then(function (payload) {
+                          if (payload.ok === false) throw new Error(payload.error || "合并失败");
+                          setBanner("已合并「" + deptView + "」：子智能体 " + String(payload.merged) + " 个。");
+                          setDeptView("");
+                          loadOverview();
+                        }).catch(function (error) { setBanner("合并失败：" + String(error && error.message ? error.message : error)); });
+                      }
+                    }, "🧩"),
                     h("button", { className: "ats-btn tiny", type: "button", onClick: function () { setDeptView(""); } }, "关闭")
                   ),
                   h("div", { className: "ats-dept-list" },
@@ -3843,8 +3880,15 @@ window.__ModuleLoader__.load({
       ".tw-tour-btn.primary{background:var(--bt-accent,#2563eb);border-color:var(--bt-accent,#2563eb);color:#fff;}",
       ".tw-tour-close{position:absolute;top:8px;right:10px;border:0;background:transparent;font-size:14px;cursor:pointer;opacity:.5;}",
       ".tw-tab{font:inherit;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid #dcdfe4;background:#eef0f3;color:#111111;cursor:pointer;white-space:nowrap;}",
-      ".tw-tab{min-width:44px;height:36px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;}",
-      ".tw-tab .tw-tab-icon{font-size:19px;line-height:1;display:inline-flex;align-items:center;}",
+      ".tw-tab{min-width:48px;height:40px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;}",
+      ".tw-tab .tw-tab-icon{font-size:22px;line-height:1;display:inline-flex;align-items:center;}",
+      ".ats-btn.tiny{font-size:15px;padding:5px 10px;}",
+      ".ats-btn{font-size:14px;}",
+      ".bt-round{width:44px;height:44px;font-size:20px;}",
+      ".ats-round{width:44px;height:44px;font-size:20px;}",
+      ".ats-send{font-size:17px;}",
+      ".bt-dept-mark{font-size:28px;width:58px;height:58px;}",
+      ".bt-dept-badge{min-width:18px;height:18px;line-height:18px;font-size:11px;}",
       ".tw-tab-on{background:#2563eb;border-color:#2563eb;color:#ffffff;font-weight:600;}",
       ".tw-session{font-size:11px;color:#666b73;white-space:nowrap;}",
       ".tw-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;}",
