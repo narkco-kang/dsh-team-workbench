@@ -196,28 +196,15 @@ window.__ModuleLoader__.load({
       ".tw-title{font-size:12.5px;font-weight:700;white-space:nowrap;}",
       ".tw-tabs{flex:1 1 auto;min-width:0;overflow-x:auto;}",
       ".tw-session{flex:0 0 auto;font-size:10px;opacity:.55;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
-      ".dta-shell{position:fixed;inset:0;z-index:2147483000;isolation:isolate;display:flex;flex-direction:column;background:transparent;color:var(--dsh-text-primary,#111111);}",
-      ".dta-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(127,127,127,.22);flex:0 0 auto;background:var(--dsh-bg,#0f1115);}",
-      ".dta-shell{pointer-events:none;}",
-      ".dta-shell>.dta-head{pointer-events:auto;}",
-      ".dta-body{pointer-events:none;}",
-      ".dta-mask{position:fixed;inset:0;background:#ffffff;pointer-events:none;z-index:-1;clip-path:polygon(evenodd,0 0,100% 0,100% 100%,0 100%,0 0,var(--dta-hole-l,0px) var(--dta-hole-t,0px),var(--dta-hole-r,0px) var(--dta-hole-t,0px),var(--dta-hole-r,0px) var(--dta-hole-b,0px),var(--dta-hole-l,0px) var(--dta-hole-b,0px),var(--dta-hole-l,0px) var(--dta-hole-t,0px));}",
-      ".dta-body>*{pointer-events:auto;}",
+      ".dta-shell{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:#ffffff;color:#111111;}",
+      ".dta-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(127,127,127,.22);flex:0 0 auto;background:#0f1115;color:#e5e7eb;}",
       ".dta-brand{font-size:16px;line-height:1;}",
       ".dta-title{font-size:13px;font-weight:700;}",
       ".dta-spacer{flex:1 1 auto;}",
       ".dta-btn{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;cursor:pointer;}",
       ".dta-body{flex:1 1 auto;min-height:0;display:flex;}",
-      ".dta-body>.tw-root{background:transparent;}",
-      ".dta-body .tw-head{background:#f7f8fa;}",
-      ".dta-body .ats-im-side{background:#f7f8fa;}",
-      ".dta-body .ats-im-main{background:#ffffff;margin-bottom:var(--dta-bottom,0px);}",
-      ".dta-body>.tw-root:not(:has(.ats-im-side)){margin-bottom:var(--dta-bottom,0px);background:#ffffff;}",
-      ".dta-body>.tw-root:has(.ats-im-side){pointer-events:none;}",
-      ".dta-body .ats-im{pointer-events:none;}",
-      ".dta-body .ats-im-side,.dta-body .ats-im-main{pointer-events:auto;}",
       ".dta-body>.tw-root{flex:1 1 auto;min-width:0;width:100%;}",
-      ".dta-launcher{position:fixed;right:16px;bottom:16px;z-index:2147483000;font:inherit;font-size:12px;padding:8px 14px;border-radius:999px;border:1px solid rgba(127,127,127,.35);background:var(--dsh-accent,#2563eb);color:#fff;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.25);}",
+      ".dta-launcher{position:fixed;right:16px;bottom:92px;z-index:2147483000;font:inherit;font-size:12px;padding:8px 14px;border-radius:999px;border:1px solid rgba(127,127,127,.35);background:var(--dsh-accent,#2563eb);color:#fff;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.25);}",
       ".ats-chat-body{display:flex;flex:1 1 auto;min-height:0;}",
       ".ats-search-results{display:flex;flex-direction:column;gap:8px;}",
       ".ats-hit{display:flex;gap:8px;align-items:flex-start;padding:9px 10px;border:1px solid rgba(127,127,127,.18);border-radius:10px;background:rgba(127,127,127,.04);cursor:pointer;font:inherit;color:inherit;text-align:left;}",
@@ -2156,53 +2143,25 @@ window.__ModuleLoader__.load({
     //#region 注册（DSH Desktop 原生工作台）
     /** 全窗口团队 App：默认铺满，可收起成右下角胶囊。 */
     function TeamApp() {
-      var openState = useState(true);
+      var stored = null;
+      try { stored = window.localStorage.getItem("dsh.teamApp.open"); } catch (error) { stored = null; }
+      var openState = useState(stored === "1");
       var open = openState[0];
       var setOpen = openState[1];
+      var change = function (next) {
+        setOpen(next);
+        try { window.localStorage.setItem("dsh.teamApp.open", next ? "1" : "0"); } catch (error) { /* 忽略 */ }
+      };
 
-      // 在整窗外壳上挖一个洞，正好露出宿主自己的输入框；
-      // 其余区域（包括宿主侧栏）都被这层遮罩盖住，不再露出「未分组 / 设置」。
-      useEffect(function () {
-        var sync = function () {
-          if (typeof document === "undefined" || typeof window === "undefined") return;
-          var card = typeof document.querySelector === "function" ? document.querySelector("[data-composer-card]") : null;
-          var bottom = 0;
-          var hole = null;
-          if (card !== null && typeof card.getBoundingClientRect === "function") {
-            var rect = card.getBoundingClientRect();
-            if (rect.width > 40 && rect.height > 20) {
-              bottom = Math.max(0, Math.min(260, Math.round(window.innerHeight - rect.top + 8)));
-              hole = { l: Math.max(0, Math.round(rect.left)), t: Math.max(0, Math.round(rect.top)), r: Math.min(window.innerWidth, Math.round(rect.right)), b: Math.min(window.innerHeight, Math.round(rect.bottom)) };
-            }
-          }
-          document.documentElement.style.setProperty("--dta-bottom", bottom + "px");
-          if (hole !== null) {
-            document.documentElement.style.setProperty("--dta-hole-l", hole.l + "px");
-            document.documentElement.style.setProperty("--dta-hole-t", hole.t + "px");
-            document.documentElement.style.setProperty("--dta-hole-r", hole.r + "px");
-            document.documentElement.style.setProperty("--dta-hole-b", hole.b + "px");
-          } else {
-            document.documentElement.style.setProperty("--dta-hole-l", "0px");
-            document.documentElement.style.setProperty("--dta-hole-t", "0px");
-            document.documentElement.style.setProperty("--dta-hole-r", "0px");
-            document.documentElement.style.setProperty("--dta-hole-b", "0px");
-          }
-        };
-        sync();
-        window.addEventListener("resize", sync);
-        var timer = setInterval(sync, 1500);
-        return function () { window.removeEventListener("resize", sync); clearInterval(timer); };
-      }, [open]);
       if (!open) {
-        return h("button", { className: "dta-launcher", type: "button", onClick: function () { setOpen(true); } }, "🧑‍🤝‍🧑 智能体团队");
+        return h("button", { className: "dta-launcher", type: "button", title: "打开智能体团队", onClick: function () { change(true); } }, "🧑‍🤝‍🧑 智能体团队");
       }
       return h("div", { className: "dta-shell" },
-        h("div", { className: "dta-mask" }),
         h("div", { className: "dta-head" },
           h("span", { className: "dta-brand" }, "🧑‍🤝‍🧑"),
           h("span", { className: "dta-title" }, "智能体团队"),
           h("span", { className: "dta-spacer" }),
-          h("button", { className: "dta-btn", type: "button", onClick: function () { setOpen(false); } }, "收起")
+          h("button", { className: "dta-btn", type: "button", onClick: function () { change(false); } }, "收起")
         ),
         h("div", { className: "dta-body" }, h(WorkbenchPanel, {}))
       );
