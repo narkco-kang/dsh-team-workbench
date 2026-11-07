@@ -601,12 +601,16 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     await persist()
     // 短消息（≤40 字）直接由该成员自己回答，跳过部门「选人→并行→汇总」，
     // 否则一条「OK」也要经历 3 次模型往返。
-    const shortAsk = text(userText).trim().length > 0 && text(userText).trim().length <= 40 && !text(userText).includes('\n')
+    // 群聊里的部门成员默认「主管直接答」：不再走选人→并行→汇总。
+    // 实测部门流水线在群里经常 45 秒超时且返回空内容，用户只想要一句答复。
+    const deptInGroup = process.env.TW_DEPT_IN_GROUP === '1'
+    const isDepartment = member.department !== null && member.department !== undefined
     let raw
-    if (shortAsk && member.department !== null && member.department !== undefined) {
+    if (isDepartment && !deptInGroup) {
       const direct = await dispatchToMember(ctx, parent, member, prompt, signal)
       // dispatchToMember 返回 output，聊天层读 text；不补这一行会让回复变成空串（面板没结果）。
-      raw = { ...direct, text: text(direct.output) }
+      const answer = text(direct.output) || (direct.stopReason === 'timeout' ? '（这一轮超时了，已放弃等待；可以直接重发）' : '')
+      raw = { ...direct, text: answer }
     } else {
       raw = await runMember(ctx, parent, member, prompt, signal)
     }
