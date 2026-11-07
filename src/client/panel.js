@@ -293,7 +293,7 @@ window.__ModuleLoader__.load({
       ".ats-compose{flex:0 0 auto;display:flex;justify-content:center;padding:10px 16px 14px;background:var(--bt-main);}",
       ".ats-composer{display:flex;flex-direction:column;gap:6px;width:100%;max-width:820px;box-sizing:border-box;padding:10px 12px 8px;border:1px solid var(--bt-line-2);border-radius:16px;background:var(--bt-card);box-shadow:0 1px 2px rgba(0,0,0,.04);transition:border-color .12s ease,box-shadow .12s ease;}",
       ".ats-composer:focus-within{border-color:var(--bt-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--bt-accent) 14%,transparent);}",
-      ".ats-composer .ats-area{width:100%;min-height:44px;max-height:200px;resize:none;padding:2px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:20px;color:var(--bt-ink);outline:none;box-shadow:none;}",
+      ".ats-composer .ats-area{width:100%;min-height:44px;max-height:200px;overflow-y:auto;resize:none;padding:2px;border:0;border-radius:0;background:transparent;font-size:14px;line-height:20px;color:var(--bt-ink);outline:none;box-shadow:none;}",
       ".ats-composer .ats-area::placeholder{color:var(--bt-ink-3);}",
       ".ats-composer .ats-area:disabled{opacity:.6;}",
       ".ats-composer-bar{display:flex;align-items:center;gap:6px;}",
@@ -1465,6 +1465,16 @@ window.__ModuleLoader__.load({
       var micOn = micState[0];
       var setMicOn = micState[1];
       var recRef = React.useRef(null);
+      var areaRef = React.useRef(null);
+
+      // 输入框高度跟着草稿走：发送后 setDraft("") 不会触发 input 事件，
+      // 只靠 onInput 的话高度会停在最后的长文本上（看起来像「输入框越变越大」）。
+      useEffect(function () {
+        var el = areaRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = Math.min(200, Math.max(44, el.scrollHeight)) + "px";
+      }, [draft, target]);
 
       var toggleVoice = function () {
         if (micOn) {
@@ -1741,6 +1751,7 @@ window.__ModuleLoader__.load({
           h("div", { className: "ats-compose" },
             h("div", { className: "ats-composer" },
               h("textarea", {
+                ref: areaRef,
                 className: "ats-area", rows: 1, value: draft,
                 placeholder: target === null
                   ? "先选一个成员或群聊，再输入消息"
