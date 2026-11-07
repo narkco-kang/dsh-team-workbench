@@ -24,6 +24,9 @@ import {
   makeId,
   readJson,
   saveStore,
+  setSteerTarget,
+  steerActive,
+  clearSteerTarget,
   text
 } from './team.js'
 import {
@@ -850,8 +853,21 @@ export function apply(ctx) {
       if (member === undefined) return json({ ok: false, error: '找不到该成员' }, 404)
       if (!member.enabled) return json({ ok: false, error: '成员已停用' }, 409)
       const key = 'p:' + member.id
-      if (busy.has(key)) return json({ ok: false, error: '该成员正在回复上一条消息' }, 409)
+      if (busy.has(key)) {
+        if (await steerActive(key, userText)) {
+          const chats = await loadChats()
+          const thread = chats.private.find((entry) => entry.memberId === member.id)
+          if (thread !== undefined) {
+            if (!Array.isArray(thread.messages)) thread.messages = []
+            pushMessage(thread.messages, messageOf('user', null, userText))
+            await saveChats(chats)
+            return json({ ok: true, steered: true, messages: thread.messages })
+          }
+        }
+        return json({ ok: false, error: '该成员正在回复上一条消息' }, 409)
+      }
       busy.add(key)
+      setSteerTarget(key)
       try {
         // 不把 HTTP 请求的 signal 传给模型调用：客户端切页/断开时，生成仍应继续并落盘，
         // 否则「切走再回来」会看到会话被中断、没有结果。
@@ -861,6 +877,7 @@ export function apply(ctx) {
         return json({ ok: false, error: String(error) }, 500)
       } finally {
         busy.delete(key)
+        clearSteerTarget(key)
       }
     }
 
@@ -868,13 +885,26 @@ export function apply(ctx) {
     const room = chats.rooms.find((entry) => entry.id === text(body.id))
     if (room === undefined) return json({ ok: false, error: '找不到该群聊' }, 404)
     const key = 'g:' + room.id
-    if (busy.has(key)) return json({ ok: false, error: '该群正在回复上一条消息' }, 409)
+    if (busy.has(key)) {
+      if (await steerActive(key, userText)) {
+        const latest = await loadChats()
+        const targetRoom = latest.rooms.find((entry) => entry.id === room.id)
+        if (targetRoom !== undefined) {
+          if (!Array.isArray(targetRoom.messages)) targetRoom.messages = []
+          pushMessage(targetRoom.messages, messageOf('user', null, userText))
+          await saveChats(latest)
+          return json({ ok: true, steered: true, messages: targetRoom.messages })
+        }
+      }
+      return json({ ok: false, error: '该群正在回复上一条消息' }, 409)
+    }
     busy.add(key)
+    setSteerTarget(key)
     try {
       // 20 秒内没跑完就先回「已派出」，结果落盘后由客户端轮询补上；
       // 不把用户按在这里等一分钟（长任务/多轮接力时尤其明显）。
       const work = sendGroup(ctx, parent, room, store.members, userText, undefined)
-      work.then((value) => { busy.delete(key); return value }, () => { busy.delete(key) })
+      work.then((value) => { busy.delete(key); clearSteerTarget(key); return value }, () => { busy.delete(key); clearSteerTarget(key) })
       const early = await Promise.race([
         work.then((value) => ({ kind: 'done', value })),
         new Promise((resolve) => setTimeout(() => resolve({ kind: 'slow' }), 20000))

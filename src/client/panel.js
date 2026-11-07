@@ -416,6 +416,7 @@ window.__ModuleLoader__.load({
       ".ats-round{width:38px;height:38px;flex:0 0 auto;border-radius:50%;border:1px solid var(--bt-line);background:transparent;color:var(--bt-ink);font:inherit;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}",
       ".ats-round:hover{background:var(--bt-hover);}",
       ".ats-round.recording{color:#dc2626;border-color:rgba(220,38,38,.5);}",
+      ".ats-round.on{background:var(--bt-accent);color:#fff;}",
       ".ats-send{height:38px;padding:0 20px;border-radius:999px;border:0;background:var(--bt-accent);color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;}",
       ".ats-send:hover{filter:brightness(1.05);}",
       ".ats-send:disabled{background:var(--bt-active);color:var(--bt-ink-3);cursor:default;filter:none;}",
@@ -2530,6 +2531,10 @@ window.__ModuleLoader__.load({
       var schedState = useState(null);
       var sched = schedState[0];
       var setSched = schedState[1];
+      // 语音通话：回复自动朗读，读完自动开麦，转写后自动发送（单向占用的半双工循环）。
+      var voiceCallState = useState(false);
+      var voiceCall = voiceCallState[0];
+      var setVoiceCall = voiceCallState[1];
 
       var busyTargetState = useState(null);
       var busyTarget = busyTargetState[0];
@@ -2748,6 +2753,7 @@ window.__ModuleLoader__.load({
             postSttAudio(blob, ms).then(function (payload) {
               var value = String((payload && payload.text) || "").trim();
               if (value.length === 0) { setBanner("没有识别到内容，换个说法再试一次。"); return; }
+              if (voiceCallRef.current === true) { setDraft(value); send(value); return; }
               setDraft(function (prev) { return prev.length > 0 ? prev + " " + value : value; });
             }).catch(function (error) {
               if (sttSettings.fallbackWebSpeech === true) {
@@ -2939,6 +2945,20 @@ window.__ModuleLoader__.load({
         return function () { clearInterval(timer); };
       }, [target]);
 
+      var voiceCallRef = { current: false };
+      voiceCallRef.current = voiceCall;
+      var voiceSpeak = function (text) {
+        if (typeof window === "undefined" || !window.speechSynthesis) return;
+        try {
+          window.speechSynthesis.cancel();
+          var utter = new SpeechSynthesisUtterance(String(text || "").slice(0, 600));
+          utter.lang = "zh-CN";
+          utter.onend = function () {
+            if (voiceCallRef.current === true) toggleVoice();
+          };
+          window.speechSynthesis.speak(utter);
+        } catch (error) { /* 朗读失败不影响文字 */ }
+      };
       var insertIntoDraft = function (value) {
         setDraft(function (prev) {
           var sep = prev.length > 0 && prev.slice(-1) !== "\n" ? "\n" : "";
@@ -3065,8 +3085,32 @@ window.__ModuleLoader__.load({
         var dest = sendTo !== null ? sendTo : target;
         if (body.length === 0 || dest === null) return;
         if (busy) {
+          // 先试「插话」：真正告诉正在跑的那一轮；失败再退回排队。
           setQueuedDraft(body);
           if (override === undefined) setDraft("");
+          var steerDest = sendTo !== null ? sendTo : target;
+          if (steerDest !== null) {
+            var steerPath = steerDest.kind === "private" ? "/api/team-workbench/chats/private" : "/api/team-workbench/chats/group";
+            var steerPayload = steerDest.kind === "private"
+              ? { sessionId: sessionId, memberId: steerDest.id, text: body, steer: true }
+              : { sessionId: sessionId, id: steerDest.id, text: body, steer: true };
+            var steerUrl = steerDest.kind === "private"
+              ? "/api/team-workbench/chats/private?memberId=" + encodeURIComponent(steerDest.id)
+              : "/api/team-workbench/chats/group?id=" + encodeURIComponent(steerDest.id);
+            fetch(steerPath, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(steerPayload) })
+              .then(function (res) { return readJsonResponse(res); })
+              .then(function (json) {
+                if (json && json.steered === true) {
+                  setQueuedDraft("");
+                  setBanner("已插话，正在影响这一轮");
+                  if (Array.isArray(json.messages)) {
+                    THREAD_CACHE[steerUrl] = json.messages;
+                    setMessages(json.messages);
+                  }
+                }
+              })
+              .catch(function () { /* 插话失败就保持排队 */ });
+          }
           return;
         }
         var pendingKey = dest.kind + ":" + dest.id;
@@ -3100,6 +3144,10 @@ window.__ModuleLoader__.load({
             setMessages(list);
             setDraft("");
             loadOverview();
+            if (voiceCallRef.current === true && list.length > 0) {
+              var lastMsg = list[list.length - 1];
+              if (lastMsg !== undefined && lastMsg.role !== "user") voiceSpeak(lastMsg.text);
+            }
             if (json && json.background === true) {
               // 服务端 20 秒没跑完就先回了「已派出」：保持等待状态，轮询到结果再收尾。
               return new Promise(function (resolve) {
@@ -3835,6 +3883,7 @@ window.__ModuleLoader__.load({
                 h("input", { id: "ats-file-input", type: "file", multiple: true, style: { display: "none" }, onChange: onPickFiles }),
                 h("button", { className: "ats-round", type: "button", title: "更多：附件 / 引用 / 发给 / 定时", "aria-label": "更多", onClick: function () { setPlusOpen(!plusOpen); setPicker(null); } }, "＋"),
                 h("button", { className: "ats-round" + (micOn ? " recording" : ""), type: "button", title: "语音输入：点一下开始录音，再点一下结束并转写", "aria-label": "语音输入", disabled: sttBusy, onClick: toggleVoice }, micOn ? "●" : "🎤"),
+                h("button", { className: "ats-round" + (voiceCall ? " on" : ""), type: "button", title: voiceCall ? "关闭语音通话" : "语音通话：自动朗读回复并续听", "aria-label": "语音通话", onClick: function () { var next = !voiceCall; setVoiceCall(next); if (!next && typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); } }, "📞"),
                 micOn ? h("span", { className: "ats-sub", style: { fontSize: "11px" } },
                   "● 录音 " + String(recSeconds) + "s · 音量 " + String(recLevel) + "% · 再点结束") : null,
                 sttBusy ? h("span", { className: "ats-sub", style: { fontSize: "11px" } },

@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.75.0'
+const PLUGIN_VERSION = '2.76.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -481,6 +481,26 @@ async function probeRoute(ctx, route) {
  *     TypeError: subagents.start is not a function（2026-10-30 实测，派发三个成员全失败）。
  *   统一收口在这里，避免以后再次随宿主升级静默失效。
  */
+// 运行中插话（steer）：宿主 Agent 暴露 steer({content, source})。
+// 派发时记下当前子 agent 与它所属的会话 key，用户中途再发消息就地插进去。
+const STEER = { key: '', agent: null }
+export function setSteerTarget(key) {
+  STEER.key = key
+  STEER.agent = null
+}
+export async function steerActive(key, message) {
+  if (STEER.key !== key || STEER.agent === null || STEER.agent === undefined) return false
+  try {
+    STEER.agent.steer({ content: [{ type: 'text', text: message }], source: { kind: 'user' } })
+    return true
+  } catch {
+    return false
+  }
+}
+export function clearSteerTarget(key) {
+  if (STEER.key === key) STEER.agent = null
+}
+
 async function startChild(subagents, providerName, request) {
   if (typeof subagents.start === 'function') return subagents.start(providerName, request)
   if (typeof subagents.startActivation !== 'function') {
@@ -527,6 +547,15 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // toolFilter 只能收窄（restrict），不能把不在子目录中的工具加进去。
   // 结论：Jev 成员只能当「判断层」（回校准概率），当不了「执行层」。
   const run = await startChild(subagents, providerName, { ...request, signal })
+  // 拿到子 agent 句柄后登记，供 steerActive 中途插话。
+  try {
+    const agents = ctx.get('agents')
+    const childId = typeof run.id === 'string' ? run.id : ''
+    const child = childId.length > 0 && agents !== undefined && agents !== null && typeof agents.get === 'function'
+      ? agents.get(childId)
+      : (run.agent ?? null)
+    if (child !== null && child !== undefined) STEER.agent = child
+  } catch { /* 拿不到句柄就退回排队 */ }
   let settled
   try {
     settled = await run.result
