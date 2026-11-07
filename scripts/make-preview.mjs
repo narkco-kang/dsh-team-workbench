@@ -105,14 +105,10 @@ window.fetch = function (url, init) {
   var React = window.React;
   var require = function (name) { return name === 'react' ? window.React : (name === 'react-dom' ? window.ReactDOM : {}); };
   var mod = window.__wbDef.factory(require);
-  var registered = null;
-  var ctx = {
-    effect: function (fn) { try { fn(); } catch (e) { console.error(e); } },
-    get: function (name) { if (name === 'desktopWorkbenches') return { register: function (descriptor, Component) { registered = Component; return function () {}; } }; return undefined; },
-    logger: { info: function () {} }
-  };
-  mod.apply(ctx);
+  var registered = mod.__panel || null;
   if (!registered) { document.body.innerHTML = '<pre>未注册</pre>'; return; }
+  var applied = 0;
+  mod.apply({ effect: function (fn) { applied += 1; if (applied === 1) { try { fn(); } catch (e) { console.error(e); } } }, get: function () {}, logger: { info: function () {} } });
   var root = window.ReactDOM.createRoot(document.getElementById('root'));
   root.render(React.createElement('div', { className: 'preview-shell' }, React.createElement(registered, {})));
 })();
