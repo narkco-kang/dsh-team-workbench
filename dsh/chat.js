@@ -493,7 +493,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
  * 语音识别的「模型校对」：让团队里的某个成员只做最小纠错（同音字/错字/漏标点），不改写、不回答。
  * 任何异常都退回原文，绝不让校对环节把用户的话改坏。
  */
-async function reviewTranscript(ctx, member, raw, glossary, signal) {
+async function reviewTranscript(ctx, target, raw, glossary, signal) {
   const lines = [
     '你是语音识别的校对员。下面是语音识别的原始文本，可能有同音字、错字、漏标点。',
     '只做最小必要纠正：改错字、补标点、纠正术语；保持原意和口语顺序。',
@@ -506,7 +506,25 @@ async function reviewTranscript(ctx, member, raw, glossary, signal) {
   const timeout = new Promise((resolve, reject) => {
     setTimeout(() => reject(new Error('校对超时')), 20000)
   })
-  const result = await Promise.race([dispatchToMember(ctx, undefined, member, lines.join('\n'), signal), timeout])
+  // target 可以是团队成员，也可以是只带 provider/model 的「虚拟校对成员」。
+  const reviewer = target.routes !== undefined
+    ? target
+    : {
+        id: '__voice_reviewer__',
+        name: '语音校对',
+        role: '语音识别校对',
+        emoji: '✍️',
+        color: '',
+        groupId: '',
+        avatar: { kind: 'emoji', imageId: '' },
+        roleRef: { library: '', id: '', version: '' },
+        instructions: '',
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        activeRouteId: 'review-route',
+        routes: [{ id: 'review-route', label: '校对', provider: text(target.provider), model: text(target.model), reasoningEffort: '', enabled: true }]
+      }
+  const result = await Promise.race([dispatchToMember(ctx, undefined, reviewer, lines.join('\n'), signal), timeout])
   let value = stripReceipts(text(result.output)).trim()
   value = value.replace(/^(纠正后(的文本)?|校对(结果|后)?|结果)[:：]\s*/u, '').trim()
   if (value.length >= 2 && value.startsWith('"')) value = value.slice(1)
@@ -829,12 +847,21 @@ export function apply(ctx) {
           durationMs: Number(url.searchParams.get('ms') || 0)
         })
         let reviewed = false
-        if (settings.reviewEnabled && text(settings.reviewMemberId).length > 0 && value.length > 0) {
-          const store = await loadStore()
-          const reviewer = store.members.find((member) => member.id === settings.reviewMemberId && member.enabled !== false)
-          if (reviewer !== undefined) {
+        const reviewProvider = text(settings.reviewProvider)
+        const reviewModel = text(settings.reviewModel)
+        const reviewMemberId = text(settings.reviewMemberId)
+        if (settings.reviewEnabled && value.length > 0 && (reviewProvider.length > 0 || reviewMemberId.length > 0)) {
+          let target = null
+          if (reviewProvider.length > 0 && reviewModel.length > 0) {
+            target = { provider: reviewProvider, model: reviewModel }
+          } else if (reviewMemberId.length > 0) {
+            const store = await loadStore()
+            const member = store.members.find((entry) => entry.id === reviewMemberId && entry.enabled !== false)
+            if (member !== undefined) target = member
+          }
+          if (target !== null) {
             try {
-              const result = await reviewTranscript(ctx, reviewer, value, settings.reviewGlossary, request.signal)
+              const result = await reviewTranscript(ctx, target, value, settings.reviewGlossary, request.signal)
               value = result.text
               reviewed = result.reviewed
             } catch (error) {

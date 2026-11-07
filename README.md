@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.25.1**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.26.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -46,17 +46,17 @@
 
 ## 安装
 
-2.25.1 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.26.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.25.1.tgz
+  plugin --profile web add ./dsh-team-workbench-2.26.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.25.1/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.26.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -66,7 +66,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.25.1**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.26.0**，否则两套入口会同时存在。
 
 ## 包结构
 
@@ -167,7 +167,7 @@ API Key 只存本机 `stt-settings.json`，接口只回「是否已配置」，�
 
 识别完可以再交给团队里的某个成员做一次**最小纠错**（同音字/错字/漏标点），提示词明确禁止改写、总结、回答。
 护栏：输出为空、长度 >2 倍、或 <40% 都拒收并回退原文；模型超时/报错同样回退原文。
-面板可配「校对成员 + 术语表」；术语表默认已填 `智能体、语音识别、接口联调、验收清单`。
+面板直接选「校对服务商 + 校对模型」（不用再挑成员、也不用猜成员用的什么模型）+ 术语表；术语表默认已填 `智能体、语音识别、接口联调、验收清单`。
 
 面板里的 **「测试转写」** 会用 0.8 秒合成音频走一遍当前服务商（不需要麦克风），
 回报「连通 · 延迟 · 返回字数」；鉴权、地址、模型任何一处配错都会当场暴露。

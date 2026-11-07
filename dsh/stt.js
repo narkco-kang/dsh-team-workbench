@@ -45,6 +45,10 @@ const DEFAULT_SETTINGS = {
   apiModel: '',
   // 模型校对：识别完再用团队里的某个成员做最小纠错（同音字/错字/漏标点），不改写。
   reviewEnabled: false,
+  // 直接指定「校对模型」，不用再挑成员（成员换模型时校对不会跟着变）。
+  reviewProvider: '',
+  reviewModel: '',
+  // 兼容旧配置：只有选了成员、没选模型时才用成员路由。
   reviewMemberId: '',
   // 语音场景的常用术语，开箱即用；用户可在面板里改。
   reviewGlossary: '智能体、语音识别、接口联调、验收清单'
@@ -71,6 +75,8 @@ export async function loadSttSettings() {
       apiKey: text(parsed?.apiKey),
       apiModel: text(parsed?.apiModel) || PROVIDERS[parsed?.provider]?.apiModel || '',
       reviewEnabled: parsed?.reviewEnabled === true,
+      reviewProvider: text(parsed?.reviewProvider),
+      reviewModel: text(parsed?.reviewModel),
       reviewMemberId: text(parsed?.reviewMemberId),
       // 没填就用默认术语表（用户明确要的默认值）。
       reviewGlossary: text(parsed?.reviewGlossary) || DEFAULT_SETTINGS.reviewGlossary
@@ -94,6 +100,8 @@ export async function saveSttSettings(next) {
     apiKey: next.apiKey === undefined ? '' : text(next.apiKey),
     apiModel: text(next.apiModel),
     reviewEnabled: next.reviewEnabled === true,
+    reviewProvider: text(next.reviewProvider),
+    reviewModel: text(next.reviewModel),
     reviewMemberId: text(next.reviewMemberId),
     reviewGlossary: text(next.reviewGlossary) || DEFAULT_SETTINGS.reviewGlossary
   }, null, 2)

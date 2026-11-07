@@ -98,7 +98,7 @@ window.fetch = function (url, init) {
     } else if (init && String(init.method || '').toUpperCase() === 'POST') {
       data = { ok: true, text: '演示上午十点开始' };
     } else {
-      data = { ok: true, settings: { enabled: true, baseUrl: 'http://127.0.0.1:9977', model: 'tiny', language: 'zh' }, probe: u.indexOf('probe=1') >= 0 ? { ok: true, status: 200 } : null };
+      data = { ok: true, settings: { enabled: true, provider: 'local', baseUrl: 'http://127.0.0.1:9977', model: 'medium', language: 'zh', reviewEnabled: true, reviewProvider: 'gpt', reviewModel: 'gpt-6-sol', reviewGlossary: '智能体、语音识别、接口联调、验收清单', apiKeyConfigured: true }, probe: u.indexOf('probe=1') >= 0 ? { ok: true, status: 200 } : null };
     }
     return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
   }
