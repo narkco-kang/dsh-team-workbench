@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.72.2'
+const PLUGIN_VERSION = '2.72.3'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -573,9 +573,22 @@ function subAgentMember(departmentName, sub) {
     enabled: true,
     createdAt: new Date().toISOString(),
     activeRouteId: 'sub-route',
-    routes: sub.provider.length > 0 && sub.model.length > 0
-      ? [{ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true }]
-      : []
+    routes: (function () {
+      const list = []
+      if (sub.provider.length > 0 && sub.model.length > 0) {
+        list.push({ id: 'sub-route', label: '自动分配', provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort, enabled: true })
+      }
+      // 子智能体也要有兜底：主路由失败时依次尝试 deepseek 两条已验证线路，
+      // 避免「某个 provider 上游抖动 → 整个部门这一棒失败」。
+      for (const fallback of [
+        { provider: 'deepseek-official', model: 'deepseek-flash' },
+        { provider: 'deepseek-official', model: 'deepseek-v4-pro' }
+      ]) {
+        if (list.some((route) => route.provider === fallback.provider && route.model === fallback.model)) continue
+        list.push({ id: 'sub-fb-' + fallback.model, label: '回退 · ' + fallback.model, provider: fallback.provider, model: fallback.model, reasoningEffort: '', enabled: true })
+      }
+      return list
+    })()
   }
 }
 
