@@ -58,16 +58,18 @@ const CHIEF_ROOM_NAME = '总管 · 用户对接'
 
 /** 让总管台与会话数据保持一致；返回是否需要写回。 */
 function ensureChiefRoom(chats, store) {
-  const chiefId = text(store.chiefId)
-  if (chiefId.length === 0 || !store.members.some((m) => m.id === chiefId)) return false
+  const chiefKnown = text(store.chiefId).length > 0 && store.members.some((m) => m.id === store.chiefId)
+  const chiefId = chiefKnown ? text(store.chiefId) : ''
+  // 没有总管时也要维护成员：否则总管台会变成空群，发消息直接报「群聊里没有有效成员」。
   const memberIds = store.members.filter((m) => m.enabled !== false).map((m) => m.id)
-  if (!memberIds.includes(chiefId)) memberIds.unshift(chiefId)
+  if (chiefId.length > 0 && !memberIds.includes(chiefId)) memberIds.unshift(chiefId)
+  if (memberIds.length === 0) return false
   let room = chats.rooms.find((entry) => entry.id === CHIEF_ROOM_ID)
   if (room === undefined) {
     chats.rooms.unshift({
       id: CHIEF_ROOM_ID,
       name: CHIEF_ROOM_NAME,
-      adminId: chiefId,
+      adminId: chiefId.length > 0 ? chiefId : memberIds[0],
       memberIds,
       responder: 'lead',
       relayDepth: 2,
@@ -78,7 +80,8 @@ function ensureChiefRoom(chats, store) {
     return true
   }
   let changed = false
-  if (room.adminId !== chiefId) { room.adminId = chiefId; changed = true }
+  const adminId = chiefId.length > 0 ? chiefId : (memberIds.includes(room.adminId) ? room.adminId : memberIds[0])
+  if (room.adminId !== adminId) { room.adminId = adminId; changed = true }
   if (room.name !== CHIEF_ROOM_NAME) { room.name = CHIEF_ROOM_NAME; changed = true }
   if (room.responder !== 'lead') { room.responder = 'lead'; changed = true }
   if (room.relayDepth !== 2) { room.relayDepth = 2; changed = true }
@@ -373,11 +376,23 @@ export function resolveMaxParallel(room, memberCount) {
 /** 群聊：按应答模式选人，管理员可 @ 指派，成员之间按接力层数继续。 */
 export async function sendGroup(ctx, parent, room, members, userText, signal) {
   const chats = await loadChats()
-  const target = chats.rooms.find((entry) => entry.id === room.id)
+  let target = chats.rooms.find((entry) => entry.id === room.id)
   if (target === undefined) throw new Error('找不到该群聊')
+  // 兜底：先把总管台的成员与当前团队同步（删人/合并后没人管这里，会出现空群）。
+  if (target.id === CHIEF_ROOM_ID) {
+    const store = await loadStore()
+    if (ensureChiefRoom(chats, store)) {
+      await saveChats(chats)
+      target = chats.rooms.find((entry) => entry.id === room.id)
+    }
+  }
   if (!Array.isArray(target.messages)) target.messages = []
   const { alive, admin } = groupRoster(target, members)
-  if (alive.length === 0) throw new Error('群聊里没有有效成员')
+  if (alive.length === 0) {
+    throw new Error(target.id === CHIEF_ROOM_ID
+      ? '总管台没有可用的成员：团队里至少要有一个启用的成员；如果都删了，请先在团队页新建。'
+      : '群聊里没有有效成员')
+  }
   const memory = await loadMemory()
   pushMessage(target.messages, messageOf('user', null, userText))
   // 过程化状态：前端轮询 progress，看到「现在轮到谁」和已经跑完的每一棒。
