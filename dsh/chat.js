@@ -52,6 +52,8 @@ const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
 const SEARCH_ROUTE = ROUTE_BASE + '/chats/search'
 const MEMORY_ROUTE = ROUTE_BASE + '/memory'
 const STT_ROUTE = ROUTE_BASE + '/stt'
+const UPLOAD_ROUTE = ROUTE_BASE + '/upload'
+const SCHEDULE_ROUTE = ROUTE_BASE + '/schedules'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -100,6 +102,30 @@ const MAX_MENTIONS = 3
 const MAX_ROOMS = 24
 
 /** 聊天记录文件。 */
+/** 附件与定时任务都放在工作台自己的目录里，卸载插件不会丢。 */
+function uploadsDir() {
+  return join(harnessHome(), 'team-workbench', 'uploads')
+}
+
+function schedulesPath() {
+  return join(harnessHome(), 'team-workbench', 'schedules.json')
+}
+
+async function loadSchedules() {
+  try {
+    const raw = await readFile(schedulesPath(), 'utf8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+async function saveSchedules(list) {
+  await mkdir(dirname(schedulesPath()), { recursive: true })
+  await writeFile(schedulesPath(), JSON.stringify(list, null, 2), 'utf8')
+}
+
 function chatsPath() {
   return join(harnessHome(), 'team-workbench', 'chats.json')
 }
@@ -1349,8 +1375,116 @@ function registerChatTools(ctx) {
     }
   }
 
-  const disposers = [ctx.tools.register(chat), ctx.tools.register(groupChat), ctx.tools.register(groupCreate)]
+  const extraDisposers = []
+  // ── 附件：把用户选的文件存进工作台目录，消息里带路径，成员可直接读 ──────────
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: UPLOAD_ROUTE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const url = new URL(request.url)
+        const rawName = url.searchParams.get('name') || 'file'
+        const safe = rawName.replace(/[^\w.\-]+/g, '_').slice(0, 80) || 'file'
+        const bytes = Buffer.from(await request.arrayBuffer())
+        if (bytes.length === 0) return json({ ok: false, error: '文件是空的' }, 400)
+        if (bytes.length > 20 * 1024 * 1024) return json({ ok: false, error: '文件超过 20MB' }, 413)
+        const dir = uploadsDir()
+        await mkdir(dir, { recursive: true })
+        const file = join(dir, Date.now() + '-' + safe)
+        await writeFile(file, bytes)
+        return json({ ok: true, path: file, name: rawName })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  // ── 定时任务：到点往指定会话发一句话 ─────────────────────────────────────────
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: SCHEDULE_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'POST') {
+          const body = await readJson(request)
+          if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+          const action = text(body.action) || 'add'
+          const list = await loadSchedules()
+          if (action === 'delete') {
+            const next = list.filter((item) => item.id !== text(body.id))
+            await saveSchedules(next)
+            return json({ ok: true, schedules: next })
+          }
+          const kind = text(body.targetKind) === 'private' ? 'private' : 'group'
+          const targetId = text(body.targetId)
+          const message = text(body.text)
+          const everyMinutes = Math.max(1, Math.min(10080, Number(body.everyMinutes) || 0))
+          if (targetId.length === 0) return json({ ok: false, error: '没有指定目标会话' }, 400)
+          if (message.length === 0) return json({ ok: false, error: '定时内容不能为空' }, 400)
+          if (everyMinutes === 0) return json({ ok: false, error: '间隔必须大于 0 分钟' }, 400)
+          list.push({
+            id: makeId('sch'),
+            targetKind: kind,
+            targetId,
+            text: message,
+            everyMinutes,
+            nextAt: Date.now() + everyMinutes * 60000,
+            lastRun: ''
+          })
+          await saveSchedules(list)
+          return json({ ok: true, schedules: list })
+        }
+        return json({ ok: true, schedules: await loadSchedules() })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  // 定时器：30 秒扫一次；到点就发，发完把 nextAt 推到下一次。
+  let ticking = false
+  const timer = setInterval(async () => {
+    if (ticking) return
+    ticking = true
+    try {
+      const list = await loadSchedules()
+      if (list.length === 0) return
+      const due = list.filter((item) => Number(item.nextAt) <= Date.now())
+      if (due.length === 0) return
+      const store = await loadStore()
+      const parent = await parentOf(ctx, '')
+      if (parent === undefined || parent === null) return
+      for (const item of due) {
+        try {
+          if (item.targetKind === 'private') {
+            const member = store.members.find((entry) => entry.id === item.targetId)
+            if (member !== undefined) await sendPrivate(ctx, parent, member, item.text, undefined)
+          } else {
+            const chats = await loadChats()
+            const room = chats.rooms.find((entry) => entry.id === item.targetId)
+            if (room !== undefined) await sendGroup(ctx, parent, room, store.members, item.text, undefined)
+          }
+          item.lastRun = new Date().toISOString()
+          item.nextAt = Date.now() + Number(item.everyMinutes) * 60000
+        } catch (error) {
+          console.warn('[team-workbench] 定时任务失败：' + String(error))
+          item.nextAt = Date.now() + Math.max(1, Number(item.everyMinutes)) * 60000
+        }
+      }
+      await saveSchedules(list)
+    } catch (error) {
+      console.warn('[team-workbench] 定时任务扫描失败：' + String(error))
+    } finally {
+      ticking = false
+    }
+  }, 30000)
+  if (typeof timer.unref === 'function') timer.unref()
+
+  const disposers = [...extraDisposers, ctx.tools.register(chat), ctx.tools.register(groupChat), ctx.tools.register(groupCreate)]
   return () => {
+    clearInterval(timer)
     for (const dispose of disposers) {
       try { dispose() } catch { /* 已释放 */ }
     }

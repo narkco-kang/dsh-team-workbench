@@ -83,7 +83,7 @@ check('工具名没有重复注册', new Set(toolNames).size === toolNames.lengt
 check('每个工具都有 description / parameters / execute',
   first.tools.every((t) => typeof t.description === 'string' && t.description.length > 0 && t.parameters !== undefined && typeof t.execute === 'function'))
 
-check('首次挂载运行时注册了 26 条路由（团队 13 + 技能库 5 + 会话 8）', first.routes.length === 26, String(first.routes.length))
+check('首次挂载运行时注册了 28 条路由（团队 13 + 技能库 5 + 会话 10）', first.routes.length === 28, String(first.routes.length))
 const routePaths = first.routes.map((r) => r.path)
 check('路由全部落在本包命名空间 /api/team-workbench',
   routePaths.every((p) => typeof p === 'string' && p.startsWith('/api/team-workbench')), routePaths.join(', '))
@@ -95,7 +95,7 @@ check('没有残留旧插件路由前缀（agent-team-studio / skill-manager）'
 check('只挂了一个 ctx.effect（释放钩子）', first.effects.length === 1, String(first.effects.length))
 check('释放钩子可执行', first.effects.length === 1 && typeof first.effects[0] === 'function')
 check('挂载期间 12 个工具都是活的', first.liveTools.size === 12, String(first.liveTools.size))
-check('挂载期间 26 条路由都是活的', first.liveRoutes.size === 26, String(first.liveRoutes.size))
+check('挂载期间 28 条路由都是活的', first.liveRoutes.size === 28, String(first.liveRoutes.size))
 
 // —— 释放 ——
 check('apply 返回释放函数', typeof dispose === 'function')
@@ -107,7 +107,7 @@ check('释放后路由登记表为空', first.liveRoutes.size === 0, [...first.l
 const second = makeCtx()
 const dispose2 = mod.apply(second.ctx, {})
 check('重新挂载后工具数仍是 12（无累积）', second.tools.length === 12, String(second.tools.length))
-check('重新挂载后路由数仍是 26（无累积）', second.routes.length === 26, String(second.routes.length))
+check('重新挂载后路由数仍是 28（无累积）', second.routes.length === 28, String(second.routes.length))
 check('重新挂载后工具名没有重复', new Set(second.tools.map((t) => t.name)).size === 12)
 dispose2()
 check('第二次释放后登记表也为空', second.liveTools.size === 0 && second.liveRoutes.size === 0, String(second.liveTools.size) + '/' + String(second.liveRoutes.size))
@@ -118,4 +118,4 @@ if (failures.length > 0) {
   for (const f of failures) console.error('  - ' + f)
   process.exit(1)
 }
-console.log('服务端冒烟测试全部通过（运行时实际注册 12 工具 / 26 路由，释放后登记表清空）')
+console.log('服务端冒烟测试全部通过（运行时实际注册 12 工具 / 28 路由，释放后登记表清空）')
