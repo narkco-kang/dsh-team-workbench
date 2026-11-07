@@ -2,7 +2,7 @@
 
 一个 **DSH 网页客户端插件**（`dsh.client.platform = web`）：把具名智能体团队做成聊天应用。
 **2.6.0 起默认收在右下角胶囊**，DSH 自己的会话与输入框照常可用；点胶囊才铺满窗口，
-右上角「收起」再缩回胶囊。当前版本 **2.8.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
+右上角「收起」再缩回胶囊。当前版本 **2.9.0**，在 **DSH Desktop 0.13.2**（macOS arm64）实测。
 
 > 2.0.0 起不再是工作台（workbench）面板：客户端不调用 `desktopWorkbenches.register`，
 > 改为挂载到 `document.body`，因此能盖住宿主导航——与 DS-Bot 的做法一致。
@@ -46,17 +46,17 @@
 
 ## 安装
 
-2.8.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
+2.9.0 是普通插件包（`dsh.bundle.patch` + `dsh.client.platform: web`），三种装法任选：
 
 ```bash
 # 1) 官方 CLI（推荐；会把包名写进 dsh.profile.bundles）
 DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness" \
   node "/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-  plugin --profile web add ./dsh-team-workbench-2.8.0.tgz
+  plugin --profile web add ./dsh-team-workbench-2.9.0.tgz
 
 # 2) 从 Release 直链装
 dsh plugin --profile web add \
-  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.8.0/dsh-team-workbench.tgz
+  https://github.com/narkco-kang/dsh-team-workbench/releases/download/v2.9.0/dsh-team-workbench.tgz
 
 # 3) 卸载
 dsh plugin --profile web remove dsh-team-workbench
@@ -66,7 +66,7 @@ dsh plugin --profile web remove dsh-team-workbench
 
 装完**重启 Harness**（菜单 Harness → 重启 Harness），右下角会出现「🧑‍🤝‍🧑 智能体团队」胶囊；
 点开就是团队 App，点右上角「收起」回到 DSH。1.x 是工作台包，同一个包名，
-**先卸掉旧工作台再装 2.8.0**，否则两套入口会同时存在。
+**先卸掉旧工作台再装 2.9.0**，否则两套入口会同时存在。
 
 ## 包结构
 
@@ -100,8 +100,10 @@ agent_team_roles、agent_team_chat、agent_team_group_chat，以及技能库的 
 - **配置**：team.json（成员 / 路由 / 分组 / 头像 / chiefId），只有一份。
 - **会话**：chats.json 里按会话分开存——每个成员一个 `private[memberId]`，每个群一个 `rooms[].messages`，
   再加一个固定的总管台 `chief-desk`；各自独立的记录，互不串。
-- **上下文**：每次请求带「最近 12 条 + 新消息」（`HISTORY_WINDOW`），有界、不常驻子会话；
-  没有向量库、没有跨会话长期记忆，也没有把聊天记录塞进提示词之外的地方。
+- **短期上下文**：每次请求带「最近 12 条 + 新消息」（`HISTORY_WINDOW`），有界、不常驻子会话。
+- **长期记忆**：每条会话另有 summary + facts，存 `memory.json`；每积累 12 条新消息由该会话负责人
+  压缩一次（后台执行，不挡回复），提示词里拼「长期记忆 + 最近 12 条 + 新消息」。
+  聊天头部「记忆」按钮可查看、手动添加/删除事实或清空。
 - **检索**：`GET /chats/search` 支持 `q` / `kind` / `id`，可只搜某个群（`kind=group&id=<roomId>`）
   或某位成员（`kind=private&id=<memberId>`）；界面上的「范围」下拉与这个参数一一对应。
 
@@ -111,6 +113,7 @@ agent_team_roles、agent_team_chat、agent_team_group_chat，以及技能库的 
 | --- | --- |
 | 团队配置（成员 / 分组 / 头像引用） | $DSH_HOME/agent-team-studio/team.json（v3） |
 | 私聊 / 群聊记录 | $DSH_HOME/team-workbench/chats.json |
+| 会话长期记忆（摘要 + 事实） | $DSH_HOME/team-workbench/memory.json |
 | 上传的头像文件 | $DSH_HOME/team-workbench/avatars/<sha256>.webp |
 | 技能库 | $DSH_HOME/.skills-src 与各 agent 的 skills |
 
@@ -135,7 +138,7 @@ node scripts/smoke-docs.mjs     # 本文档的测试项数与实跑对答案
 | 层次 | 覆盖情况 |
 | --- | --- |
 | 客户端注册与渲染 | `smoke-client.mjs`（结构 42 项）+ `render-client.mjs`（真实 React SSR 19 项） |
-| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 21 路由、释放后登记表清空） |
+| 服务端注册与释放 | `smoke-server.mjs`（真执行 `apply()`，24 项：11 工具 / 22 路由、释放后登记表清空） |
 | 工具 `execute` 与路由 handler | `run-tools.mjs`（临时 HOME 内真调用，43 项） |
 | 会话功能 | `smoke-chat.mjs`（20 项：私聊连续追问、群聊 @、Auto 挑人、接力层数、工具调用、聊天记录检索） |
 | 数据层功能 | `smoke-v12.mjs`（预设 15 人 6 组、角色导入、分组增删、角色检索与正文） |

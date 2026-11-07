@@ -23,12 +23,14 @@ import {
   readJson,
   text
 } from './team.js'
+import { addFact, compactIfNeeded, loadMemory, memoryBlock, removeFact, saveMemory, slotOf } from './memory.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
 const GROUP_ROUTE = ROUTE_BASE + '/chats/group'
 const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
 const SEARCH_ROUTE = ROUTE_BASE + '/chats/search'
+const MEMORY_ROUTE = ROUTE_BASE + '/memory'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -133,9 +135,11 @@ function transcript(messages, selfName) {
   return recent.map((m) => (m.role === 'user' ? '用户：' : (m.name || selfName) + '：') + m.text).join('\n')
 }
 
-function privatePrompt(member, messages, userText) {
+function privatePrompt(member, messages, userText, memoryText) {
   return [
     '【私聊】你在和用户一对一对话。',
+    memoryText.length > 0 ? '' : null,
+    memoryText.length > 0 ? memoryText : null,
     '',
     '最近的聊天记录：',
     transcript(messages, member.name),
@@ -165,10 +169,12 @@ function groupPreamble(room, members) {
   }
 }
 
-function adminPrompt(room, members, messages, userText) {
+function adminPrompt(room, members, messages, userText, memoryText) {
   const info = groupPreamble(room, members)
   return [
     ...info.lines,
+    memoryText.length > 0 ? '' : null,
+    memoryText.length > 0 ? memoryText : null,
     '',
     '最近的群聊记录：',
     transcript(messages, '成员'),
@@ -181,10 +187,12 @@ function adminPrompt(room, members, messages, userText) {
   ].join('\n')
 }
 
-function memberPrompt(room, member, members, messages, userText, asker) {
+function memberPrompt(room, member, members, messages, userText, asker, memoryText) {
   const info = groupPreamble(room, members)
   return [
     ...info.lines,
+    memoryText.length > 0 ? '' : null,
+    memoryText.length > 0 ? memoryText : null,
     '',
     '最近的群聊记录：',
     transcript(messages, '成员'),
@@ -230,10 +238,14 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   if (chats.private[key] === undefined) chats.private[key] = { messages: [], updatedAt: 0 }
   const thread = chats.private[key]
   pushMessage(thread.messages, messageOf('user', null, userText))
-  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText), signal)
+  const memory = await loadMemory()
+  const slot = slotOf(memory, 'private', member.id)
+  const reply = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryBlock(slot)), signal)
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
   thread.updatedAt = new Date().toISOString()
   await saveChats(chats)
+  void compactIfNeeded(ctx, parent, 'private', member.id, thread.messages, member, member.name, signal)
+    .catch((error) => console.warn('[team-workbench] 私聊记忆压缩失败：' + String(error)))
   return { messages: thread.messages, reply }
 }
 
@@ -281,6 +293,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   if (!Array.isArray(target.messages)) target.messages = []
   const { alive, admin } = groupRoster(target, members)
   if (alive.length === 0) throw new Error('群聊里没有有效成员')
+  const memory = await loadMemory()
   pushMessage(target.messages, messageOf('user', null, userText))
   await saveChats(chats)
 
@@ -316,9 +329,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       if (used.has(member.id)) continue
       used.add(member.id)
       if (turns.length >= MAX_TURNS_PER_MESSAGE) break
+      const memoryText = memoryBlock(slotOf(memory, 'room', target.id))
       const prompt = depth === 0 && admin !== undefined && member.id === admin.id
-        ? adminPrompt(target, alive, target.messages.slice(0, -1), userText)
-        : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker)
+        ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
+        : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
       const reply = await runMember(ctx, parent, member, prompt, signal)
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
@@ -333,6 +347,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     queue = next
     depth += 1
   }
+  void compactIfNeeded(ctx, parent, 'room', target.id, target.messages, admin, target.name, signal)
+    .catch((error) => console.warn('[team-workbench] 群聊记忆压缩失败：' + String(error)))
   return { messages: target.messages, turns, responder, pickedId }
 }
 
@@ -583,6 +599,50 @@ export function apply(ctx) {
           Number(url.searchParams.get('limit') || 60)
         )
         return json({ ok: true, ...result })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
+    }
+  }))
+
+  own(ctx.connection.fetch.register({
+    path: MEMORY_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'GET') {
+          const url = new URL(request.url)
+          const kind = url.searchParams.get('kind') === 'room' ? 'room' : 'private'
+          const id = url.searchParams.get('id') || ''
+          const memory = await loadMemory()
+          if (id.length === 0) return json({ ok: true, private: memory.private, rooms: memory.rooms })
+          return json({ ok: true, kind, id, memory: slotOf(memory, kind, id) })
+        }
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const kind = text(body.kind) === 'room' ? 'room' : 'private'
+        const id = text(body.id)
+        if (id.length === 0) return json({ ok: false, error: '缺少会话 id' }, 400)
+        const memory = await loadMemory()
+        const slot = slotOf(memory, kind, id)
+        const action = text(body.action) || 'remember'
+        if (action === 'forget-fact') {
+          if (!removeFact(slot, text(body.factId))) return json({ ok: false, error: '找不到这条事实' }, 404)
+        } else if (action === 'clear') {
+          slot.summary = ''
+          slot.facts = []
+          slot.since = 0
+        } else if (action === 'remember') {
+          const fact = text(body.text).trim()
+          if (fact.length === 0) return json({ ok: false, error: '事实不能为空' }, 400)
+          addFact(slot, fact)
+        } else {
+          return json({ ok: false, error: '未知的 action' }, 400)
+        }
+        slot.updatedAt = new Date().toISOString()
+        await saveMemory(memory)
+        return json({ ok: true, kind, id, memory: slot })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }
