@@ -460,16 +460,33 @@ window.__ModuleLoader__.load({
       "@media (max-width:720px){.ats-grid{grid-template-columns:1fr;}.tw-title{display:none;}}",
     ].join("\n");
     //#region 宿主通信    //#region 宿主通信
+    // 统一解析：服务端若返回纯文本（例如 "not found"），不能直接 res.json()，
+    // 否则会抛 "Unexpected token 'o', ... is not valid JSON"，用户完全看不懂。
+    function readJsonResponse(res) {
+      return res.text().then(function (raw) {
+        var data = null;
+        try { data = raw.length > 0 ? JSON.parse(raw) : null; } catch (error) { data = null; }
+        if (data === null) {
+          var hint = res.status === 404
+            ? "接口不存在（HTTP 404）——插件可能刚更新但 Harness 还没重启，请重启 Harness 后再试。"
+            : "服务端返回了非 JSON 内容（HTTP " + res.status + "）。";
+          throw new Error(hint + " 原始返回：" + String(raw || "").slice(0, 60));
+        }
+        return data;
+      });
+    }
     function unwrap(res) {
-      return res.json().then(function (data) {
+      return readJsonResponse(res).then(function (data) {
         if (!res.ok || data.ok === false) throw new Error(data && data.error ? data.error : "请求失败（HTTP " + res.status + "）");
         return data;
       });
     }
     function fetchState() {
       return fetch(ROUTE_STATE, { cache: "no-store" }).then(function (res) {
-        if (!res.ok) throw new Error("状态读取失败（HTTP " + res.status + "）");
-        return res.json();
+        return readJsonResponse(res).then(function (data) {
+          if (!res.ok) throw new Error("状态读取失败（HTTP " + res.status + "）");
+          return data;
+        });
       });
     }
     function postMembers(body) {
@@ -477,7 +494,7 @@ window.__ModuleLoader__.load({
     }
     function postProbe(body) {
       return fetch(ROUTE_PROBE, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(function (res) {
-        return res.json().then(function (data) {
+        return readJsonResponse(res).then(function (data) {
           if (!res.ok) throw new Error(data && data.error ? data.error : "探测失败（HTTP " + res.status + "）");
           return data;
         });
@@ -2424,7 +2441,7 @@ window.__ModuleLoader__.load({
         var alive = true;
         var loadStats = function () {
           fetch("/api/team-workbench/session-stats?sessionId=" + encodeURIComponent(sessionId), { cache: "no-store" })
-            .then(function (res) { return res.json(); })
+            .then(function (res) { return readJsonResponse(res); })
             .then(function (payload) { if (alive && payload.ok === true) setSessionStats(payload.stats || null); })
             .catch(function () { /* 统计失败不影响聊天 */ });
         };

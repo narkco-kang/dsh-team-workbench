@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2.71.1 — 2026-11-08
+
+- 修非 JSON 响应导致的报错：客户端所有请求改为先读 text 再 JSON.parse，服务端返回纯文本时给出可读提示（HTTP 404 会提示需要重启 Harness）；
+- 覆盖 unwrap / fetchState / postProbe / session-stats 四处直接 res.json()。
+
 ## 2.71.0 — 2026-11-08
 
 - 自己发的消息也有操作条：⧉ 复制、✎ 重新编辑到输入框、用量估算、时间；
