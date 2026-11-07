@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2.83.0 — 2026-11-08
+
+参考 Grok Bot 的引擎发现，给本机 bot 补能力画像：
+- 建 bot 时读 ~/.claude(.json)：MCP servers、插件、技能目录、项目与会话数；
+- 读 ~/.codex：默认模型、mcp_servers、skills、prompts；
+- 能力清单写进 instructions（截 1500 字），老 bot 自动补一次；
+- 新增 /platforms?profiles=1 返回扫描结果与画像。
+
 ## 2.82.0 — 2026-11-08
 
 参考 OpenMausBot 的 bring-your-own-agents：

@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.82.0'
+const PLUGIN_VERSION = '2.83.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -2624,6 +2624,12 @@ export function apply(ctx, config) {
         }
         const url = new URL(request.url)
         const auto = url.searchParams.get('auto') === '1'
+        if (url.searchParams.get('profiles') === '1') {
+          const platforms = await mod.scanPlatforms()
+          const profiles = {}
+          for (const platform of platforms) profiles[platform.id] = await mod.platformProfile(platform.id)
+          return json({ ok: true, platforms, profiles })
+        }
         if (auto) {
           const result = await mod.importPlatforms({})
           return json({ ok: true, auto: true, ...result })

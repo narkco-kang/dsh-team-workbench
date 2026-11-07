@@ -25,6 +25,9 @@ ok('成员带 sourcePlatform', first.created.every((m) => typeof m.sourcePlatfor
 const second = await importPlatforms({})
 ok('二次接入不重复创建', second.created.length === 0, String(second.created.length))
 
+const capabilityBots = first.created.filter((m) => m.instructions.includes('【本机能力】'))
+ok('至少一个 bot 写入了本机能力', capabilityBots.length > 0, String(capabilityBots.length))
+
 const store = await loadStore()
 ok('store 里成员数等于首次创建数', store.members.length === first.created.length, String(store.members.length))
 
