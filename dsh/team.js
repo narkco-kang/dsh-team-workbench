@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.99.2'
+const PLUGIN_VERSION = '3.0.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -818,7 +818,7 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       // 每个子智能体最多 30 秒；一个慢成员不能拖住整轮汇总。
       const result = await Promise.race([
         dispatchToMember(ctx, parent, target, prompt, signal),
-        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 15000))
+        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 25000))
       ])
       // 流式：每个子智能体一产出就贴到群里，不等其他人，也不等主管汇总。
       if (hooks !== undefined && typeof hooks.onSubResult === 'function' && text(result.output).trim().length > 0) {
