@@ -90,6 +90,18 @@ window.fetch = function (url, init) {
   else if (u.indexOf('/api/team-workbench/roles') === 0) data = window.__DSH_PREVIEW__.roles;
   else if (u.indexOf('/api/team-workbench/skills') === 0) data = { ok: true, skills: [], deployed: [] };
   else if (u.indexOf('/api/team-workbench/chats/private') === 0) data = { ok: true, member: null, messages: window.__DSH_PREVIEW__.messages.private };
+  if (init && String(init.method || '').toUpperCase() === 'POST' && (u.indexOf('/api/team-workbench/chats/private') === 0 || u.indexOf('/api/team-workbench/chats/group') === 0)) {
+    // 仅用于截图：延迟 6 秒返回，方便看「正在思考」状态条。
+    var isPrivate = u.indexOf('/private') >= 0;
+    var bucket = isPrivate ? window.__DSH_PREVIEW__.messages.private : window.__DSH_PREVIEW__.messages.group;
+    var incoming = JSON.parse(init.body || '{}');
+    var stamp = new Date().toISOString();
+    var agentMsg = (window.__DSH_PREVIEW__.messages.group || []).filter(function (m) { return m.role === 'agent'; })[0] || { memberId: 'x', name: '成员', emoji: '🤖' };
+    bucket.push({ id: 'u' + Date.now(), role: 'user', memberId: '', name: '用户', emoji: '🧑', text: incoming.text || '', time: stamp });
+    bucket.push({ id: 'a' + Date.now(), role: 'agent', memberId: agentMsg.memberId, name: agentMsg.name, emoji: agentMsg.emoji, text: '（预览）收到，我按这个要求处理，完成后给你结论。', time: stamp });
+    var payload = { ok: true, messages: bucket };
+    return new Promise(function (resolve) { setTimeout(function () { resolve({ ok: true, status: 200, json: function () { return Promise.resolve(payload); } }); }, 6000); });
+  }
   else if (u.indexOf('/api/team-workbench/chats/group') === 0) data = { ok: true, room: window.__DSH_PREVIEW__.chats.rooms[0], messages: window.__DSH_PREVIEW__.messages.group };
   else if (u.indexOf('/api/team-workbench/chats/search') === 0) {
     var q = decodeURIComponent((u.split('q=')[1] || '').split('&')[0]);
