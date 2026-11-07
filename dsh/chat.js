@@ -123,6 +123,43 @@ async function readCredential(name) {
   }
 }
 
+/** 成员/群忙时收到的消息进收件箱，落盘保存，本轮结束后自动接着跑（对齐 superagent 的 inbox）。 */
+function inboxPath() {
+  return join(harnessHome(), 'team-workbench', 'inbox.json')
+}
+
+async function loadInbox() {
+  try {
+    const raw = await readFile(inboxPath(), 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+async function saveInbox(value) {
+  await mkdir(dirname(inboxPath()), { recursive: true })
+  await writeFile(inboxPath(), JSON.stringify(value, null, 2), 'utf8')
+}
+
+async function enqueueInbox(key, message) {
+  const inbox = await loadInbox()
+  if (!Array.isArray(inbox[key])) inbox[key] = []
+  inbox[key].push(String(message))
+  await saveInbox(inbox)
+}
+
+async function takeInbox(key) {
+  const inbox = await loadInbox()
+  const list = Array.isArray(inbox[key]) ? inbox[key] : []
+  if (list.length > 0) {
+    delete inbox[key]
+    await saveInbox(inbox)
+  }
+  return list
+}
+
 function schedulesPath() {
   return join(harnessHome(), 'team-workbench', 'schedules.json')
 }
@@ -899,7 +936,7 @@ export function apply(ctx) {
     if (room === undefined) return json({ ok: false, error: '找不到该群聊' }, 404)
     const key = 'g:' + room.id
     if (busy.has(key)) {
-      if (await steerActive(key, userText)) {
+      if (body?.steer === true && await steerActive(key, userText)) {
         const latest = await loadChats()
         const targetRoom = latest.rooms.find((entry) => entry.id === room.id)
         if (targetRoom !== undefined) {
@@ -909,7 +946,11 @@ export function apply(ctx) {
           return json({ ok: true, steered: true, messages: targetRoom.messages })
         }
       }
-      return json({ ok: false, error: '该群正在回复上一条消息' }, 409)
+      // 插不进去就落盘排队，本轮结束后自动接着发（刷新页面也不丢）。
+      await enqueueInbox(key, userText)
+      const queuedChats = await loadChats()
+      const queuedRoom = queuedChats.rooms.find((entry) => entry.id === room.id)
+      return json({ ok: true, queued: true, messages: Array.isArray(queuedRoom?.messages) ? queuedRoom.messages : [] })
     }
     busy.add(key)
     setSteerTarget(key)
@@ -917,7 +958,28 @@ export function apply(ctx) {
       // 20 秒内没跑完就先回「已派出」，结果落盘后由客户端轮询补上；
       // 不把用户按在这里等一分钟（长任务/多轮接力时尤其明显）。
       const work = sendGroup(ctx, parent, room, store.members, userText, undefined)
-      work.then((value) => { busy.delete(key); clearSteerTarget(key); return value }, () => { busy.delete(key); clearSteerTarget(key) })
+      const settle = async () => {
+        busy.delete(key)
+        clearSteerTarget(key)
+        // 收件箱还有话就接着跑（不阻塞当前请求）。
+        try {
+          const pending = await takeInbox(key)
+          if (pending.length === 0) return
+          busy.add(key)
+          setSteerTarget(key)
+          const latestChats = await loadChats()
+          const nextRoom = latestChats.rooms.find((entry) => entry.id === room.id)
+          if (nextRoom !== undefined) {
+            await sendGroup(ctx, parent, nextRoom, store.members, pending.join('\n'), undefined)
+          }
+        } catch (error) {
+          console.warn('[team-workbench] 收件箱续跑失败：' + String(error))
+        } finally {
+          busy.delete(key)
+          clearSteerTarget(key)
+        }
+      }
+      work.then(settle, settle)
       const early = await Promise.race([
         work.then((value) => ({ kind: 'done', value })),
         new Promise((resolve) => setTimeout(() => resolve({ kind: 'slow' }), 20000))

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.78.0 — 2026-11-08
+
+对齐 dsh-superagent 的交互架构：
+- 持久子会话：每个成员固定 childId，复用同一子会话（上下文保留 + 前缀缓存）；
+- 收件箱：忙时收到的消息落盘排队，本轮结束后自动续跑，刷新不丢；运行中仍优先 steer；
+- 新增 docs/ARCHITECTURE-superagent.md 记录概念映射与未采用项。
+
 ## 2.77.0 — 2026-11-08
 
 - 语音通话改用服务端 TTS：新增 /tts 路由，调用 MiniMax t2a_v2（speech-02-hd，hex mp3），

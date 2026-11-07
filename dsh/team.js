@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.77.0'
+const PLUGIN_VERSION = '2.78.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -506,9 +506,10 @@ async function startChild(subagents, providerName, request) {
   if (typeof subagents.startActivation !== 'function') {
     throw new Error('宿主 subagents 服务既无 start 也无 startActivation，无法派发')
   }
-  const { signal, ...rest } = request
+  const { signal, childId, ...rest } = request
   return subagents.startActivation({
     provider: providerName,
+    ...(typeof childId === 'string' && childId.length > 0 ? { childId } : {}),
     request: rest,
     signal: signal !== undefined && signal !== null ? signal : new AbortController().signal,
     label: rest.label
@@ -546,7 +547,10 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // 试过 toolFilter:{allow:[...]} 想给它加几个无参工具，**无效**：
   // toolFilter 只能收窄（restrict），不能把不在子目录中的工具加进去。
   // 结论：Jev 成员只能当「判断层」（回校准概率），当不了「执行层」。
-  const run = await startChild(subagents, providerName, { ...request, signal })
+  // 持久会话（对齐 dsh-superagent 的 per-worker session）：同一成员复用同一个 childId，
+  // 宿主的本地子级支持后续消息与冷恢复，既保留上下文，也能吃到前缀缓存。
+  const childId = 'team-' + member.id
+  const run = await startChild(subagents, providerName, { ...request, signal, childId })
   // 拿到子 agent 句柄后登记，供 steerActive 中途插话。
   try {
     const agents = ctx.get('agents')
