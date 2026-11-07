@@ -14,7 +14,18 @@ import { dirname, join } from 'node:path'
 import { harnessHome, text } from './team.js'
 
 const SETTINGS_FILE = 'stt-settings.json'
-const DEFAULT_SETTINGS = { enabled: true, baseUrl: 'http://127.0.0.1:9977', model: 'tiny', language: 'zh', fallbackWebSpeech: false }
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  // local = 转发给本地 stt；openai = 直接调任意 OpenAI 兼容 /audio/transcriptions（whisper-1 等，准确率更高）
+  mode: 'local',
+  baseUrl: 'http://127.0.0.1:9977',
+  model: 'medium',
+  language: 'zh',
+  fallbackWebSpeech: false,
+  apiBase: 'https://api.openai.com/v1',
+  apiKey: '',
+  apiModel: 'whisper-1'
+}
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const TIMEOUT_MS = 120000
 
@@ -31,7 +42,11 @@ export async function loadSttSettings() {
       model: text(parsed?.model) || DEFAULT_SETTINGS.model,
       language: text(parsed?.language) || DEFAULT_SETTINGS.language,
       // 默认不回退浏览器识别：Electron 里 Web Speech 往往要联网，失败信息反而盖住真正的原因。
-      fallbackWebSpeech: parsed?.fallbackWebSpeech === true
+      fallbackWebSpeech: parsed?.fallbackWebSpeech === true,
+      mode: parsed?.mode === 'openai' ? 'openai' : 'local',
+      apiBase: text(parsed?.apiBase) || DEFAULT_SETTINGS.apiBase,
+      apiKey: text(parsed?.apiKey),
+      apiModel: text(parsed?.apiModel) || DEFAULT_SETTINGS.apiModel
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -46,7 +61,11 @@ export async function saveSttSettings(next) {
     baseUrl: text(next.baseUrl) || DEFAULT_SETTINGS.baseUrl,
     model: text(next.model) || DEFAULT_SETTINGS.model,
     language: text(next.language) || DEFAULT_SETTINGS.language,
-    fallbackWebSpeech: next.fallbackWebSpeech === true
+    fallbackWebSpeech: next.fallbackWebSpeech === true,
+    mode: next.mode === 'openai' ? 'openai' : 'local',
+    apiBase: text(next.apiBase) || DEFAULT_SETTINGS.apiBase,
+    apiKey: next.apiKey === undefined ? '' : text(next.apiKey),
+    apiModel: text(next.apiModel) || DEFAULT_SETTINGS.apiModel
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
   await writeFile(temp, payload, 'utf8')
@@ -111,19 +130,39 @@ export async function transcribe(bytes, options = {}) {
   if (Number.isFinite(durationMs) && durationMs > 0 && durationMs < 600) throw new Error('录音太短（不到 1 秒），请按住麦克风说一句')
   if (bytes.length < 1500) throw new Error('没有录到声音（音频过小），检查麦克风权限后重试')
   if (bytes.length > MAX_AUDIO_BYTES) throw new Error('音频超过 ' + String(Math.round(MAX_AUDIO_BYTES / 1024 / 1024)) + 'MB 上限')
-  const base = text(settings.baseUrl).replace(/\/+$/, '')
+  const openaiMode = settings.mode === 'openai'
   const form = new FormData()
   form.append('file', new Blob([bytes], { type: options.contentType || 'audio/webm' }), options.filename || 'speech.webm')
   form.append('language', settings.language || 'zh')
-  form.append('model', settings.model || 'tiny')
   form.append('response_format', 'text')
-  const response = await fetch(base + '/api', {
+  const headers = {}
+  let endpoint = ''
+  if (openaiMode) {
+    const apiBase = text(settings.apiBase).replace(/\/+$/, '')
+    if (apiBase.length === 0) throw new Error('没有配置 OpenAI 兼容接口地址')
+    endpoint = apiBase + '/audio/transcriptions'
+    form.append('model', text(settings.apiModel) || 'whisper-1')
+    if (text(settings.apiKey).length > 0) headers.authorization = 'Bearer ' + text(settings.apiKey)
+  } else {
+    const base = text(settings.baseUrl).replace(/\/+$/, '')
+    endpoint = base + '/api'
+    form.append('model', settings.model || 'small')
+  }
+  const response = await fetch(endpoint, {
     method: 'POST',
     body: form,
+    headers,
     signal: AbortSignal.timeout(TIMEOUT_MS)
   })
   const raw = await response.text()
   if (!response.ok) throw new Error('STT HTTP ' + String(response.status) + '：' + raw.slice(0, 200))
+  // OpenAI 兼容接口通常回纯文本；也兼容 {text:"…"} 的 JSON 形态（本地 stt 的 /v1 就是这样）。
+  if (openaiMode) {
+    let parsed = null
+    try { parsed = JSON.parse(raw) } catch { /* 纯文本 */ }
+    const value = parsed !== null && typeof parsed === 'object' && typeof parsed.text === 'string' ? parsed.text : raw
+    return cleanTranscript(value)
+  }
   let payload = null
   try { payload = JSON.parse(raw) } catch { /* 可能是纯文本 */ }
   if (payload !== null && typeof payload === 'object' && 'code' in payload) {

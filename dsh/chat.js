@@ -769,15 +769,21 @@ export function apply(ctx) {
         if (request.method === 'GET') {
           const settings = await loadSttSettings()
           const probe = url.searchParams.get('probe') === '1' ? await probeStt(settings) : null
-          return json({ ok: true, settings, probe })
+          // apiKey 只回「有没有配」，不回明文。
+          const safe = { ...settings, apiKey: '', apiKeyConfigured: settings.apiKey.length > 0 }
+          return json({ ok: true, settings: safe, probe })
         }
         const type = String(request.headers.get('content-type') || '')
         if (type.includes('application/json')) {
           const body = await readJson(request)
           if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
           if (text(body.action) === 'settings') {
-            const saved = await saveSttSettings(body.stt !== null && typeof body.stt === 'object' ? body.stt : {})
-            return json({ ok: true, settings: saved })
+            const incoming = body.stt !== null && typeof body.stt === 'object' ? { ...body.stt } : {}
+            const current = await loadSttSettings()
+            // 前端拿不到明文 key，留空表示沿用旧值。
+            if (text(incoming.apiKey).length === 0) incoming.apiKey = current.apiKey
+            const saved = await saveSttSettings(incoming)
+            return json({ ok: true, settings: { ...saved, apiKey: '', apiKeyConfigured: saved.apiKey.length > 0 } })
           }
           if (text(body.action) === 'probe') return json({ ok: true, probe: await probeStt(await loadSttSettings()) })
           return json({ ok: false, error: '未知的 action' }, 400)

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2.22.0 — 2026-11-07
+
+- 识别率：默认模型 tiny → medium（本地 faster-whisper），实测同一句
+  「这个接口联调的风险,要在验收清单里写清楚」tiny 识别成「整个接口轮调…」，medium 正确；
+  另下载并缓存了 small / medium / large-v3-turbo；
+- 耗时：给本地 stt 打了「模型进程内缓存」补丁（原实现每请求重建 WhisperModel，
+  单次 20-40s → medium 5-7s、small 1-3s）；
+- stt 的 initial_prompt_zh 写入中文术语表（智能体/语音识别/接口/联调/验收/排期…），提升标点与专名；
+- 新增 OpenAI 兼容模式（参考 EchoBird 的 voice input）：可指向任意 /audio/transcriptions
+  （whisper-1 等），填 apiBase/apiModel/apiKey；本地 stt 的 /v1 也能直接用作该模式（已实测）；
+- 采集参数按口述优化：单声道 16k、关闭回声消除、开降噪与自动增益、64kbps opus；
+- 语音面板模型下拉带质量说明（tiny 最快但差 → large-v3 最准但慢）。
+
 ## 2.21.2 — 2026-11-07
 
 - 打开「语音」面板时自动探测本地服务，直接显示「服务在线 / 服务不可达：…」，不用先点「测试」。
