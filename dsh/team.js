@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.2.0'
+const PLUGIN_VERSION = '3.3.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -859,10 +859,28 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
     outcomes.push(...chunk)
   }
 
-  // 已经逐条贴过群，就不再做一次汇总调用（省掉约 8–9 秒）。
+  // 已经逐条贴过群：默认不再做一次汇总调用（省掉约 8–9 秒）；
+  // 群里开启「汇总」时，主管再补一段结论（子智能体发言已经流式贴出，不会被这段拖住）。
   if (hooks !== undefined && typeof hooks.onSubResult === 'function') {
-    const streamed = outcomes.filter((entry) => entry.text.trim().length > 0).map((entry) => entry.name + '：' + entry.text).join('\n\n')
-    return { text: streamed.length > 0 ? '' : '（子智能体都没有产出内容）', output: '', stopReason: 'completed', attempts: [], picks }
+    const usableNow = outcomes.filter((entry) => entry.text.trim().length > 0)
+    if (hooks.synthesize !== true || usableNow.length === 0) {
+      return { text: usableNow.length > 0 ? '' : '（子智能体都没有产出内容）', output: '', stopReason: 'completed', attempts: [], picks }
+    }
+    const digestNow = usableNow.map((entry) => '【' + entry.name + '】\n' + entry.text).join('\n\n')
+    const synthPromptNow = [
+      '你是「' + department.name + '」的部门主管，下面是你手下子智能体的结论：',
+      digestNow.slice(0, 4000),
+      '',
+      '用户任务：',
+      String(task).slice(0, 1200),
+      '',
+      '请综合成一段最终答复（不超过 150 字）：先给结论，再给关键依据或风险；不要罗列“某某说”，不要暴露内部流程。',
+      '只输出纯文本，禁止调用任何工具。'
+    ].join('\n')
+    const synthNow = await dispatchToMember(ctx, parent, member, synthPromptNow, signal)
+    const finalNow = text(synthNow.output).trim()
+    const answerNow = finalNow.length > 0 && !/"picks"\s*:/.test(finalNow) ? finalNow : ''
+    return { text: answerNow, output: answerNow, stopReason: synthNow.stopReason, detail: synthNow.detail, provider: synthNow.provider, model: synthNow.model, attempts: synthNow.attempts ?? [], picks }
   }
   const usable = outcomes.filter((entry) => entry.text.trim().length > 0)
   if (usable.length === 0) {

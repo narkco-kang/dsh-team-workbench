@@ -88,6 +88,7 @@ function ensureChiefRoom(chats, store) {
       memberIds,
       responder: 'everyone',
       relayDepth: 1,
+      synthesize: true,
       createdAt: new Date().toISOString(),
       updatedAt: '',
       messages: []
@@ -101,6 +102,8 @@ function ensureChiefRoom(chats, store) {
   // 用户改过的应答方式/接力层数不再被覆盖；只有缺省时才补默认值。
   if (!RESPONDERS.includes(text(room.responder))) { room.responder = 'lead'; changed = true }
   if (!Number.isSafeInteger(Number(room.relayDepth))) { room.relayDepth = 1; changed = true }
+  // 汇总开关：默认开（主管给出结论）；关掉则只并列展示子智能体发言。
+  if (room.synthesize !== false) { room.synthesize = true; changed = true }
   // 成员：保留用户手工加入的子智能体（sub: 前缀）。
   // 已经有子智能体时，总管台就按「主管 + 子智能体」组群，不再把本机 bot 全塞进来
   // （全员轮流模式下每多一个人就多一次串行调用）。
@@ -687,7 +690,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
       onSubResult: async (sub, text) => {
         pushMessage(target.messages, messageOf('agent', { id: 'sub:' + sub.id, name: sub.name, emoji: '🧩' }, text))
         await persist()
-      }
+      },
+      synthesize: target.synthesize !== false
     }
     const raw = await runMember(ctx, parent, member, prompt, signal, liveOptions)
     const reply = { ...raw, text: stripReceipts(raw.text) }
@@ -969,6 +973,7 @@ export async function chatOverview(ctx) {
             : subById.get(id)))
           .filter((entry) => entry !== undefined),
         responder: responderOf(room),
+        synthesize: room.synthesize !== false,
         relayDepth: relayDepthOf(room),
         count: Array.isArray(room.messages) ? room.messages.length : 0,
         lastText: last ? last.text.slice(0, 120) : '',
@@ -1002,7 +1007,8 @@ export async function applyRoomAction(body) {
     const parallel = body?.room?.parallel !== false
     const configured = Number(body?.room?.maxParallel)
     const maxParallel = Number.isSafeInteger(configured) && configured >= 1 && configured <= 5 ? configured : undefined
-    const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, parallel, maxParallel, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
+    const synthesize = body?.room?.synthesize === false ? false : true
+    const room = { id: makeId('room'), name, adminId, memberIds, responder, relayDepth, parallel, maxParallel, synthesize, createdAt: new Date().toISOString(), updatedAt: '', messages: [] }
     if (maxParallel === undefined) delete room.maxParallel
     chats.rooms.push(room)
     await saveChats(chats)
@@ -1051,6 +1057,7 @@ export async function applyRoomAction(body) {
     const adminId = text(body?.room?.adminId)
     if (adminId.length > 0 && room.memberIds.includes(adminId)) room.adminId = adminId
     if (RESPONDERS.includes(text(body?.room?.responder))) room.responder = text(body.room.responder)
+    if (body?.room?.synthesize === false || body?.room?.synthesize === true) room.synthesize = body.room.synthesize === true
     const relayValue = Number(body?.room?.relayDepth)
     if (Number.isSafeInteger(relayValue) && relayValue >= 0 && relayValue <= 2) room.relayDepth = relayValue
     if (body?.room?.parallel !== undefined) room.parallel = body.room.parallel !== false

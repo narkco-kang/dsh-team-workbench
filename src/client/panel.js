@@ -3345,7 +3345,8 @@ window.__ModuleLoader__.load({
             "👥 " + String(currentRoom.memberIds.length),
             "💬 " + (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "@ 才答" : currentRoom.responder === "everyone" ? "全员轮流" : "管理员先答"),
             "🔁 " + String(relayDepth),
-            "⚡ " + (currentRoom.parallel === false ? "串行" : "并行" + (currentRoom.maxParallel ? "(" + String(currentRoom.maxParallel) + ")" : ""))
+            "⚡ " + (currentRoom.parallel === false ? "串行" : "并行" + (currentRoom.maxParallel ? "(" + String(currentRoom.maxParallel) + ")" : "")),
+            currentRoom.synthesize === false ? "🧾 只并列" : "🧾 有汇总"
           ].filter(function (part) { return part.length > 0; }).join("  ·  ")
         : "";
 
@@ -3789,6 +3790,21 @@ window.__ModuleLoader__.load({
                   }
                 }, "🎤"),
                 h("button", { className: "ats-btn tiny", type: "button", "data-tip": "长期记忆", "aria-label": "记忆", onClick: function () { if (memoryOpen) setMemoryOpen(false); else openMemory(); } }, "🧠"),
+                currentRoom !== null && currentRoom !== undefined
+                  ? h("button", {
+                    className: "ats-btn tiny", type: "button",
+                    "data-tip": currentRoom.synthesize === false ? "当前：只并列子智能体发言（点击开启主管汇总）" : "当前：主管会补一段结论（点击改为只并列）",
+                    "aria-label": "汇总开关",
+                    onClick: function () {
+                      var next = currentRoom.synthesize === false;
+                      postChatRoom({ action: "update", id: currentRoom.id, room: { id: currentRoom.id, synthesize: next } })
+                        .then(function (payload) {
+                          setData(function (prev) { return Object.assign({}, prev, { rooms: payload.rooms || prev.rooms }); });
+                        })
+                        .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); });
+                    }
+                  }, currentRoom.synthesize === false ? "🧾" : "🧾✓")
+                  : null,
                 h("button", { className: "ats-btn tiny", type: "button", "data-tip": "记录检索", "aria-label": "记录检索", onClick: function () { if (props.onOpenRecords && target !== null) props.onOpenRecords(target.kind, target.id); } }, "🗂️"),
                 h("button", { className: "ats-btn tiny", type: "button", "data-tip": "团队设置", "aria-label": "设置", onClick: function () { if (props.onOpenSettings) props.onOpenSettings(); } }, "⚙️"),
                 currentRoom !== null && currentRoom !== undefined
@@ -4377,6 +4393,9 @@ window.__ModuleLoader__.load({
                 ),
                 h("select", { className: "ats-select", style: { flex: "0 0 110px" }, value: form.maxParallel === undefined ? "auto" : String(form.maxParallel), onChange: function (e) { setForm(Object.assign({}, form, { maxParallel: e.target.value === "auto" ? undefined : Number(e.target.value) })); } },
                   [{ value: "auto", label: "并发：自动" }].concat([1, 2, 3, 4, 5].map(function (n) { return { value: String(n), label: "并发 " + n }; })).map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                ),
+                h("select", { className: "ats-select", style: { flex: "0 0 130px" }, value: form.synthesize === false ? "off" : "on", onChange: function (e) { setForm(Object.assign({}, form, { synthesize: e.target.value === "on" })); } },
+                  [{ value: "on", label: "汇总：主管给结论" }, { value: "off", label: "汇总：只并列发言" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 )
               ),
               h("div", { className: "ats-check-list", style: { alignItems: "flex-start" } },
