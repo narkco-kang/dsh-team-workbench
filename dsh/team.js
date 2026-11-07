@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.89.0'
+const PLUGIN_VERSION = '2.90.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -759,7 +759,7 @@ function keywordPicks(task, subs) {
 /**
  * 部门成员：先由「部门主管」挑 1–4 个子智能体并分任务，再并行执行，最后由主管汇总。
  */
-export async function runDepartmentMember(ctx, parent, member, task, signal) {
+export async function runDepartmentMember(ctx, parent, member, task, signal, hooks) {
   const department = member.department
   const subs = department.subAgents
   const roster = subs.map((sub, index) => String(index + 1) + '. ' + sub.name + '｜' + sub.role).join('\n')
@@ -781,6 +781,11 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
 
   const outcomes = await Promise.all(picks.map(async (pick) => {
     const sub = subAgentMember(department.name, pick.sub)
+    // 子智能体也进入工单域：各自一条 Assignment（对齐 superagent 的 per-worker 记录）。
+    const assignmentId = hooks !== undefined && typeof hooks.onSubStart === 'function'
+      ? await hooks.onSubStart(sub).catch(() => '')
+      : ''
+    const startedSub = Date.now()
     const target = await withRoleInstructions(sub)
     const prompt = [
       '你是「' + department.name + '」部门里的「' + sub.name + '」。',
@@ -799,8 +804,14 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
         dispatchToMember(ctx, parent, target, prompt, signal),
         new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 30000))
       ])
+      if (hooks !== undefined && typeof hooks.onSubEnd === 'function' && assignmentId.length > 0) {
+        await hooks.onSubEnd(assignmentId, { ok: result.stopReason === 'completed', ms: Date.now() - startedSub, stopReason: result.stopReason }).catch(() => undefined)
+      }
       return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed', attempts: result.attempts ?? [] }
     } catch (error) {
+      if (hooks !== undefined && typeof hooks.onSubEnd === 'function' && assignmentId.length > 0) {
+        await hooks.onSubEnd(assignmentId, { ok: false, ms: Date.now() - startedSub, stopReason: 'error' }).catch(() => undefined)
+      }
       return { name: sub.name, text: '', ok: false, error: String(error) }
     }
   }))
@@ -836,9 +847,9 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
 }
 
 /** 统一入口：部门成员走「主管 → 子智能体 → 汇总」，普通成员直接派发。 */
-export async function runAnyMember(ctx, parent, member, task, signal) {
+export async function runAnyMember(ctx, parent, member, task, signal, hooks) {
   if (member.department !== null && member.department !== undefined && member.department.subAgents.length > 0) {
-    return runDepartmentMember(ctx, parent, member, task, signal)
+    return runDepartmentMember(ctx, parent, member, task, signal, hooks)
   }
   return dispatchToMember(ctx, parent, member, task, signal)
 }

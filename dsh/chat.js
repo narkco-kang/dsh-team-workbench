@@ -429,10 +429,16 @@ async function parentOf(ctx, sessionId) {
 
 const MEMBER_HARD_TIMEOUT_MS = 90000
 
-async function runMember(ctx, parent, member, prompt, signal) {
+async function runMember(ctx, parent, member, prompt, signal, options) {
   // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
+  const ticketId = options !== undefined ? text(options.ticketId) : ''
+  // 子智能体也登记 Assignment：谁执行、耗时、成败都进工单。
+  const hooks = ticketId.length > 0 ? {
+    onSubStart: async (sub) => addAssignment(ticketId, sub.id, sub.name),
+    onSubEnd: async (assignmentId, patch) => finishAssignment(assignmentId, patch)
+  } : undefined
   const work = member.department !== null && member.department !== undefined && member.department.subAgents.length > 0
-    ? runDepartmentMember(ctx, parent, member, prompt, signal)
+    ? runDepartmentMember(ctx, parent, member, prompt, signal, hooks)
     : dispatchToMember(ctx, parent, member, prompt, signal)
   // 硬超时：宿主偶尔不返回，群聊不能被无限挂住。
   const result = await Promise.race([
@@ -450,7 +456,7 @@ async function runMember(ctx, parent, member, prompt, signal) {
 }
 
 /** 私聊：发送一条消息并等待回复。 */
-export async function sendPrivate(ctx, parent, member, userText, signal) {
+export async function sendPrivate(ctx, parent, member, userText, signal, options) {
   const chats = await loadChats()
   const key = member.id
   if (chats.private[key] === undefined) chats.private[key] = { messages: [], updatedAt: 0 }
@@ -461,7 +467,7 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
   const memoryText = await memoryBlock(slot, memory.persona, userText)
-  const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal)
+  const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal, options)
   const reply = { ...raw, text: stripReceipts(raw.text) }
   const step = thread.progress.steps[0]
   step.phase = 'done'
@@ -526,7 +532,7 @@ export function resolveMaxParallel(room, memberCount) {
 }
 
 /** 群聊：按应答模式选人，管理员可 @ 指派，成员之间按接力层数继续。 */
-export async function sendGroup(ctx, parent, room, members, userText, signal) {
+export async function sendGroup(ctx, parent, room, members, userText, signal, options) {
   const chats = await loadChats()
   let target = chats.rooms.find((entry) => entry.id === room.id)
   if (target === undefined) throw new Error('找不到该群聊')
@@ -602,7 +608,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     // 短消息（≤40 字）直接由该成员自己回答，跳过部门「选人→并行→汇总」，
     // 否则一条「OK」也要经历 3 次模型往返。
     // 部门成员一律走「主管 → 全部子智能体并行 → 主管汇总」。
-    const raw = await runMember(ctx, parent, member, prompt, signal)
+    const raw = await runMember(ctx, parent, member, prompt, signal, options)
     const reply = { ...raw, text: stripReceipts(raw.text) }
     step.phase = 'done'
     step.ms = Date.now() - Date.parse(step.startedAt)
@@ -1017,7 +1023,7 @@ export function apply(ctx) {
         // 否则「切走再回来」会看到会话被中断、没有结果。
         const assignment = await addAssignment(ticket.id, member.id, member.name)
         const started = Date.now()
-        const result = await sendPrivate(ctx, parent, member, userText, undefined)
+        const result = await sendPrivate(ctx, parent, member, userText, undefined, { ticketId: ticket.id })
         await finishAssignment(assignment, { ok: result.stopReason === 'completed', ms: Date.now() - started })
         const lastText = text(result.messages?.[result.messages.length - 1]?.text ?? '')
         await endTicket(ticket.id, lastText)
@@ -1073,7 +1079,7 @@ export function apply(ctx) {
     try {
       // 20 秒内没跑完就先回「已派出」，结果落盘后由客户端轮询补上；
       // 不把用户按在这里等一分钟（长任务/多轮接力时尤其明显）。
-      const work = sendGroup(ctx, parent, room, store.members, userText, undefined)
+      const work = sendGroup(ctx, parent, room, store.members, userText, undefined, { ticketId: ticket.id })
       const settle = async () => {
         busy.delete(key)
         clearSteerTarget(key)
