@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.99.0'
+const PLUGIN_VERSION = '2.99.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -790,7 +790,12 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
   const fanoutLimit = Math.max(1, Math.min(12, subs.length))
   const picks = subs.slice(0, fanoutLimit).map((sub) => ({ sub, task: '' }))
 
-  const outcomes = await Promise.all(picks.map(async (pick) => {
+  // 宿主对同时激活数有上限：一批最多 4 个，其余排队，避免后面的被 12 秒截断。
+  const outcomes = []
+  const batchSize = 4
+  for (let offset = 0; offset < picks.length; offset += batchSize) {
+    const batch = picks.slice(offset, offset + batchSize)
+    const chunk = await Promise.all(batch.map(async (pick) => {
     const sub = subAgentMember(department.name, pick.sub)
     // 子智能体也进入工单域：各自一条 Assignment（对齐 superagent 的 per-worker 记录）。
     const assignmentId = hooks !== undefined && typeof hooks.onSubStart === 'function'
@@ -813,7 +818,7 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       // 每个子智能体最多 30 秒；一个慢成员不能拖住整轮汇总。
       const result = await Promise.race([
         dispatchToMember(ctx, parent, target, prompt, signal),
-        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 12000))
+        new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 15000))
       ])
       // 流式：每个子智能体一产出就贴到群里，不等其他人，也不等主管汇总。
       if (hooks !== undefined && typeof hooks.onSubResult === 'function' && text(result.output).trim().length > 0) {
@@ -830,6 +835,8 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       return { name: sub.name, text: '', ok: false, error: String(error) }
     }
   }))
+    outcomes.push(...chunk)
+  }
 
   // 已经逐条贴过群，就不再做一次汇总调用（省掉约 8–9 秒）。
   if (hooks !== undefined && typeof hooks.onSubResult === 'function') {

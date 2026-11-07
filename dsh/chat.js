@@ -463,6 +463,9 @@ async function runMember(ctx, parent, member, prompt, signal, options) {
         break
       }
       if (options !== undefined && typeof options.onSubStepEnd === 'function') await options.onSubStepEnd(endedName, patch).catch(() => undefined)
+    },
+    onSubResult: async (sub, text) => {
+      if (options !== undefined && typeof options.onSubResult === 'function') await options.onSubResult(sub, text).catch(() => undefined)
       if (ticketId.length > 0 && assignmentId.length > 0) finishAssignment(assignmentId, patch)
     }
   }
