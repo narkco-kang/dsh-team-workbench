@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.49.0'
+const PLUGIN_VERSION = '2.50.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -281,7 +281,7 @@ export async function loadStore() {
 }
 
 /** 原子写回；从旧版本升级时先留一份备份。 */
-async function saveStore(store) {
+export async function saveStore(store) {
   const target = storePath()
   await mkdir(dirname(target), { recursive: true })
   try {

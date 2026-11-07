@@ -23,6 +23,7 @@ import {
   loadStore,
   makeId,
   readJson,
+  saveStore,
   text
 } from './team.js'
 import {
@@ -44,6 +45,7 @@ import {
 import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
+const MERGE_ROUTE = ROUTE_BASE + '/chats/merge'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
 const GROUP_ROUTE = ROUTE_BASE + '/chats/group'
 const ROOMS_ROUTE = ROUTE_BASE + '/chats/rooms'
@@ -790,6 +792,90 @@ export function apply(ctx) {
     requestBody: 'buffered',
     fetch: async () => {
       try { return json(await chatOverview(ctx)) } catch (error) { return json({ ok: false, error: String(error) }, 500) }
+    }
+  }))
+
+  // 把同一部门的多个成员合并成「一个部门智能体」：子智能体保留、私聊历史合并、群成员引用替换。
+  own(ctx.connection.fetch.register({
+    path: MERGE_ROUTE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        const body = await readJson(request)
+        if (body === undefined) return json({ ok: false, error: '请求体必须是 JSON 对象' }, 400)
+        const name = text(body.name)
+        if (name.length === 0) return json({ ok: false, error: '缺少部门名' }, 400)
+        const store = await loadStore()
+        const index = await loadRoleIndex()
+        const cats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+        const deptOf = (member) => member.department !== null && member.department !== undefined
+          ? member.department.name
+          : (member.roleRef.id.length > 0 ? (cats.get(member.roleRef.id) || '') : '')
+        const targets = store.members.filter((member) => deptOf(member) === name)
+        if (targets.length < 2) return json({ ok: false, error: '「' + name + '」不足 2 名成员，无需合并' }, 400)
+
+        const subAgents = targets.map((member) => {
+          const route = member.routes[0]
+          return {
+            id: makeId('s'),
+            name: member.name,
+            role: member.role,
+            emoji: member.emoji,
+            provider: route === undefined ? '' : route.provider,
+            model: route === undefined ? '' : route.model,
+            reasoningEffort: route === undefined ? '' : route.reasoningEffort,
+            roleRef: member.roleRef
+          }
+        })
+        const lead = subAgents[0]
+        const merged = {
+          id: makeId('m'),
+          name,
+          role: '部门智能体 · ' + String(subAgents.length) + ' 个子智能体',
+          emoji: '🏢',
+          color: targets[0].color,
+          groupId: targets[0].groupId,
+          avatar: { kind: 'emoji', imageId: '' },
+          roleRef: { library: '', id: '', version: '' },
+          instructions: '',
+          enabled: true,
+          createdAt: new Date().toISOString(),
+          routes: lead.provider.length > 0 && lead.model.length > 0
+            ? [{ id: makeId('r'), label: '部门主管', provider: lead.provider, model: lead.model, reasoningEffort: lead.reasoningEffort, enabled: true }]
+            : [],
+          activeRouteId: '',
+          department: { name, subAgents }
+        }
+        merged.activeRouteId = merged.routes.length > 0 ? merged.routes[0].id : ''
+
+        const chats = await loadChats()
+        const targetIds = new Set(targets.map((member) => member.id))
+        const mergedMessages = []
+        for (const member of targets) {
+          const thread = chats.private[member.id]
+          if (thread === undefined || !Array.isArray(thread.messages)) continue
+          mergedMessages.push(...thread.messages)
+          delete chats.private[member.id]
+        }
+        chats.private[merged.id] = { messages: mergedMessages, updatedAt: new Date().toISOString() }
+        for (const room of chats.rooms) {
+          if (Array.isArray(room.memberIds) && room.memberIds.some((id) => targetIds.has(id))) {
+            const rest = room.memberIds.filter((id) => !targetIds.has(id))
+            room.memberIds = [merged.id, ...rest]
+          }
+          if (targetIds.has(room.adminId)) room.adminId = merged.id
+        }
+        await saveChats(chats)
+
+        store.members = store.members.filter((member) => !targetIds.has(member.id))
+        if (targetIds.has(store.chiefId)) store.chiefId = ''
+        store.members.push(merged)
+        await saveStore(store)
+        return json({ ok: true, memberId: merged.id, name, merged: targets.length, messages: mergedMessages.length })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
+      }
     }
   }))
 
