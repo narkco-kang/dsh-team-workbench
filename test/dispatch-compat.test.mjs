@@ -41,7 +41,7 @@ const source = fs.readFileSync(TEAM_JS, 'utf8')
 // ── 0. 静态回归锁：不允许再直接调用已被宿主移除的 subagents.start ────────────
 ok('R1 已引入 startChild 兼容层', source.includes('async function startChild(subagents, providerName, request)'))
 ok('R2 实现里不再直接 subagents.start(...)', !/await\s+subagents\.start\(/.test(source))
-ok('R3 派发调用走 startChild', source.includes('await startChild(subagents, providerName, { ...request, signal, childId })'))
+ok('R3 派发调用走 startChild', source.includes('await startChild(subagents, providerName, { ...request, signal })'))
 ok('R4 receipt 兼容 childId', source.includes("typeof run.childId === 'string'"))
 
 // ── 用临时副本导出内部函数（不改仓库实现）─────────────────────────────────

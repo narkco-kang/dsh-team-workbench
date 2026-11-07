@@ -195,15 +195,32 @@ function emptyChats() {
   return { version: CHAT_VERSION, private: {}, rooms: [] }
 }
 
+/** 历史消息里曾经把对象写进 text，读出来统一转成字符串，避免前端渲染成 [object Object]。 */
+function normalizeMessageText(list) {
+  if (!Array.isArray(list)) return list
+  for (const message of list) {
+    if (message === null || typeof message !== 'object') continue
+    if (typeof message.text === 'string') continue
+    if (message.text === undefined || message.text === null) message.text = ''
+    else if (typeof message.text === 'object') {
+      try { message.text = JSON.stringify(message.text) } catch { message.text = String(message.text) }
+    } else message.text = String(message.text)
+  }
+  return list
+}
+
 async function loadChats() {
   try {
     const parsed = JSON.parse(await readFile(chatsPath(), 'utf8'))
     const priv = parsed !== null && typeof parsed.private === 'object' && parsed.private !== null ? parsed.private : {}
     const rooms = Array.isArray(parsed?.rooms) ? parsed.rooms : []
+    for (const thread of Object.values(priv)) normalizeMessageText(thread?.messages)
+    const clean = rooms.filter((room) => room !== null && typeof room === 'object' && typeof room.id === 'string')
+    for (const room of clean) normalizeMessageText(room.messages)
     return {
       version: CHAT_VERSION,
       private: priv,
-      rooms: rooms.filter((room) => room !== null && typeof room === 'object' && typeof room.id === 'string')
+      rooms: clean
     }
   } catch (error) {
     if (error?.code !== 'ENOENT') console.warn('[team-workbench] 读取聊天记录失败：' + String(error))

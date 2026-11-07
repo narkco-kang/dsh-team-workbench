@@ -2362,7 +2362,18 @@ window.__ModuleLoader__.load({
       var setTarget = targetState[1];
       var messagesState = useState([]);
       var messages = messagesState[0];
-      var setMessages = messagesState[1];
+      var setMessagesRaw = messagesState[1];
+      // 历史数据里可能有对象的 text，渲染前统一成字符串（否则显示 [object Object]）。
+      var setMessages = function (list) {
+        var next = (Array.isArray(list) ? list : []).map(function (m) {
+          if (m === null || typeof m !== "object") return m;
+          if (typeof m.text === "string") return m;
+          var value = m.text;
+          var text = value === undefined || value === null ? "" : (typeof value === "object" ? JSON.stringify(value) : String(value));
+          return Object.assign({}, m, { text: text });
+        });
+        setMessagesRaw(next);
+      };
       var textState = useState("");
       var draft = textState[0];
       var setDraft = textState[1];
