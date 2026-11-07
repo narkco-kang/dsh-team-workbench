@@ -442,10 +442,31 @@ async function runMember(ctx, parent, member, prompt, signal, options) {
   // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
   // superagent 扇出：主管把任务发给全部子智能体并行执行，再由主管汇总。
   const ticketId = options !== undefined ? text(options.ticketId) : ''
-  const hooks = ticketId.length > 0 ? {
-    onSubStart: async (sub) => addAssignment(ticketId, sub.id, sub.name),
-    onSubEnd: async (assignmentId, patch) => finishAssignment(assignmentId, patch)
-  } : undefined
+  // 子智能体也要出现在状态条里：各自一行，显示进行中/完成/耗时。
+  const subSteps = new Map()
+  const hooks = {
+    onSubStart: async (sub) => {
+      const step = { name: sub.name, emoji: sub.emoji || '🧩', startedAt: new Date().toISOString(), phase: 'thinking', ms: 0, summary: '部门子智能体 · 正在执行' }
+      subSteps.set(sub.name, step)
+      target.progress.steps = (Array.isArray(target.progress.steps) ? target.progress.steps : []).concat(step)
+      target.progress.parallel = (Array.isArray(target.progress.parallel) ? target.progress.parallel : []).concat(sub.name)
+      await persist()
+      return ticketId.length > 0 ? addAssignment(ticketId, sub.id, sub.name) : ''
+    },
+    onSubEnd: async (assignmentId, patch) => {
+      for (const [name, step] of subSteps) {
+        if (step.phase !== 'thinking') continue
+        step.phase = patch && patch.ok === false ? 'failed' : 'done'
+        step.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0
+        step.summary = step.phase === 'done' ? '子智能体已完成' : '子智能体未产出'
+        target.progress.parallel = (target.progress.parallel || []).filter((entry) => entry !== name)
+        subSteps.delete(name)
+        break
+      }
+      await persist()
+      if (ticketId.length > 0 && assignmentId.length > 0) finishAssignment(assignmentId, patch)
+    }
+  }
   const work = member.department !== null && member.department !== undefined && member.department.subAgents.length > 0
     ? runDepartmentMember(ctx, parent, member, prompt, signal, hooks)
     : dispatchToMember(ctx, parent, member, prompt, signal)
