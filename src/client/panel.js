@@ -1605,7 +1605,7 @@ window.__ModuleLoader__.load({
       var sttBusyState = useState(false);
       var sttBusy = sttBusyState[0];
       var setSttBusy = sttBusyState[1];
-      var sttSettingsState = useState({ enabled: true, mode: "local", baseUrl: "http://127.0.0.1:9977", model: "medium", language: "zh", fallbackWebSpeech: false, apiBase: "https://api.openai.com/v1", apiModel: "whisper-1", apiKey: "", apiKeyConfigured: false });
+      var sttSettingsState = useState({ enabled: true, provider: "local", baseUrl: "http://127.0.0.1:9977", model: "medium", language: "zh", fallbackWebSpeech: false, apiBase: "", apiModel: "", apiKey: "", apiKeyConfigured: false, reviewEnabled: false, reviewMemberId: "", reviewGlossary: "智能体、语音识别、接口联调、验收清单" });
       var sttSettings = sttSettingsState[0];
       var setSttSettings = sttSettingsState[1];
       var sttOpenState = useState(false);

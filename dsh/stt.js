@@ -46,7 +46,8 @@ const DEFAULT_SETTINGS = {
   // 模型校对：识别完再用团队里的某个成员做最小纠错（同音字/错字/漏标点），不改写。
   reviewEnabled: false,
   reviewMemberId: '',
-  reviewGlossary: ''
+  // 语音场景的常用术语，开箱即用；用户可在面板里改。
+  reviewGlossary: '智能体、语音识别、接口联调、验收清单'
 }
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const TIMEOUT_MS = 120000
@@ -71,7 +72,8 @@ export async function loadSttSettings() {
       apiModel: text(parsed?.apiModel) || PROVIDERS[parsed?.provider]?.apiModel || '',
       reviewEnabled: parsed?.reviewEnabled === true,
       reviewMemberId: text(parsed?.reviewMemberId),
-      reviewGlossary: text(parsed?.reviewGlossary)
+      // 没填就用默认术语表（用户明确要的默认值）。
+      reviewGlossary: text(parsed?.reviewGlossary) || DEFAULT_SETTINGS.reviewGlossary
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -93,7 +95,7 @@ export async function saveSttSettings(next) {
     apiModel: text(next.apiModel),
     reviewEnabled: next.reviewEnabled === true,
     reviewMemberId: text(next.reviewMemberId),
-    reviewGlossary: text(next.reviewGlossary)
+    reviewGlossary: text(next.reviewGlossary) || DEFAULT_SETTINGS.reviewGlossary
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
   await writeFile(temp, payload, 'utf8')
