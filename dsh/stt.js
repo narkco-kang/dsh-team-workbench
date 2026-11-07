@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { harnessHome, text } from './team.js'
 
 const SETTINGS_FILE = 'stt-settings.json'
-const DEFAULT_SETTINGS = { enabled: true, baseUrl: 'http://127.0.0.1:9977', model: 'tiny', language: 'zh' }
+const DEFAULT_SETTINGS = { enabled: true, baseUrl: 'http://127.0.0.1:9977', model: 'tiny', language: 'zh', fallbackWebSpeech: false }
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 const TIMEOUT_MS = 120000
 
@@ -29,7 +29,9 @@ export async function loadSttSettings() {
       enabled: parsed?.enabled !== false,
       baseUrl: text(parsed?.baseUrl) || DEFAULT_SETTINGS.baseUrl,
       model: text(parsed?.model) || DEFAULT_SETTINGS.model,
-      language: text(parsed?.language) || DEFAULT_SETTINGS.language
+      language: text(parsed?.language) || DEFAULT_SETTINGS.language,
+      // 默认不回退浏览器识别：Electron 里 Web Speech 往往要联网，失败信息反而盖住真正的原因。
+      fallbackWebSpeech: parsed?.fallbackWebSpeech === true
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -43,7 +45,8 @@ export async function saveSttSettings(next) {
     enabled: next.enabled !== false,
     baseUrl: text(next.baseUrl) || DEFAULT_SETTINGS.baseUrl,
     model: text(next.model) || DEFAULT_SETTINGS.model,
-    language: text(next.language) || DEFAULT_SETTINGS.language
+    language: text(next.language) || DEFAULT_SETTINGS.language,
+    fallbackWebSpeech: next.fallbackWebSpeech === true
   }, null, 2)
   const temp = target + '.tmp-' + process.pid + '-' + Date.now()
   await writeFile(temp, payload, 'utf8')

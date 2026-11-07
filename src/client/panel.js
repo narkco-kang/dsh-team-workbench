@@ -408,7 +408,18 @@ window.__ModuleLoader__.load({
         headers: { "content-type": blob.type || "audio/webm" },
         body: blob,
         signal: AbortSignal.timeout(150000)
-      }).then(unwrap);
+      }).then(function (res) {
+        var type = String(res.headers.get("content-type") || "");
+        if (!res.ok || type.indexOf("json") < 0) {
+          // 路由没注册时宿主会回 404 + HTML，别把它当成识别失败去回退浏览器。
+          if (res.status === 404) throw new Error("语音接口未就绪（重启 Harness 后生效）");
+          throw new Error("语音接口异常 HTTP " + res.status);
+        }
+        return res.json().then(function (payload) {
+          if (!payload || payload.ok === false) throw new Error((payload && payload.error) || "语音识别失败");
+          return payload;
+        });
+      });
     }
     function fetchMemorySettings() {
       return fetch("/api/team-workbench/memory", { cache: "no-store" }).then(unwrap);
@@ -1563,7 +1574,7 @@ window.__ModuleLoader__.load({
       var sttBusyState = useState(false);
       var sttBusy = sttBusyState[0];
       var setSttBusy = sttBusyState[1];
-      var sttSettingsState = useState({ enabled: true, baseUrl: "http://127.0.0.1:9977", model: "tiny", language: "zh" });
+      var sttSettingsState = useState({ enabled: true, baseUrl: "http://127.0.0.1:9977", model: "tiny", language: "zh", fallbackWebSpeech: false });
       var sttSettings = sttSettingsState[0];
       var setSttSettings = sttSettingsState[1];
       var sttOpenState = useState(false);
@@ -1654,7 +1665,11 @@ window.__ModuleLoader__.load({
         }
         var canRecord = typeof navigator !== "undefined" && navigator.mediaDevices &&
           typeof navigator.mediaDevices.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
-        if (!canRecord) { startWebSpeech(); return; }
+        if (!canRecord) {
+          if (sttSettings.fallbackWebSpeech === true) { startWebSpeech(); return; }
+          setBanner("这个客户端不支持直接录音（MediaRecorder 不可用）；点「语音」可用本地 STT，或在设置里打开回退");
+          return;
+        }
         navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
           var mr = new MediaRecorder(stream);
           recorderRef.current = mr;
@@ -1672,9 +1687,12 @@ window.__ModuleLoader__.load({
               if (value.length === 0) { setBanner("没有识别到内容，换个说法再试一次。"); return; }
               setDraft(function (prev) { return prev.length > 0 ? prev + " " + value : value; });
             }).catch(function (error) {
-              var msg = String(error && error.message ? error.message : error);
-              setBanner("本地 STT 不可用：" + sttErrorText(error) + "；已回退浏览器识别");
-              startWebSpeech();
+              if (sttSettings.fallbackWebSpeech === true) {
+                setBanner("本地 STT 不可用：" + sttErrorText(error) + "；已回退浏览器识别");
+                startWebSpeech();
+                return;
+              }
+              setBanner("语音没转成：" + sttErrorText(error) + "。可点「语音」检查地址，或在设置里打开「回退浏览器识别」");
             }).then(function () { setSttBusy(false); });
           };
           mr.start();
@@ -1687,8 +1705,12 @@ window.__ModuleLoader__.load({
             setBanner("麦克风权限被拒绝：在系统设置里允许 DSH Desktop 使用麦克风；也可以点「语音」接本地 STT");
             return;
           }
-          setBanner("拿不到麦克风（" + msg + "），改用浏览器识别");
-          startWebSpeech();
+          if (sttSettings.fallbackWebSpeech === true) {
+            setBanner("拿不到麦克风（" + msg + "），改用浏览器识别");
+            startWebSpeech();
+            return;
+          }
+          setBanner("拿不到麦克风（" + msg + "）。点「语音」可检查本地 STT，或在设置里打开「回退浏览器识别」");
         });
       };
       var formState = useState(null);
@@ -2229,6 +2251,13 @@ window.__ModuleLoader__.load({
                     onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { enabled: e.target.checked })); }
                   }),
                   "启用"
+                ),
+                h("label", { className: "ats-check", title: "本地 STT 不可用时用浏览器 Web Speech（Electron 里通常要联网，容易报 network）" },
+                  h("input", {
+                    type: "checkbox", checked: sttSettings.fallbackWebSpeech === true,
+                    onChange: function (e) { setSttSettings(Object.assign({}, sttSettings, { fallbackWebSpeech: e.target.checked })); }
+                  }),
+                  "回退浏览器识别"
                 )
               ),
               h("div", { className: "ats-bar", style: { marginTop: "8px" } },
