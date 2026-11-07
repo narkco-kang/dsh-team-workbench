@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.54.0'
+const PLUGIN_VERSION = '2.55.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1065,10 +1065,6 @@ function registerTools(ctx) {
       // 先按固定名字找；找不到再按职责关键词兜底，这样「项目部」预设
       // （质量审核员 / 交付复核员）不必为了关卡改名。
       const byRole = (pattern) => store.members.find((entry) => entry.enabled && (pattern.test(entry.role) || pattern.test(entry.name)))
-      const auditor = byName(GATE_AUDITOR) ?? byRole(/审核/)
-      const reviewer = byName(GATE_REVIEWER) ?? byRole(/复核/)
-      if (auditor === undefined) throw new Error('名册中没有「' + GATE_AUDITOR + '」或职责含「审核」的成员，审核关卡无法执行')
-      if (reviewer === undefined) throw new Error('名册中没有「' + GATE_REVIEWER + '」或职责含「复核」的成员，复核关卡无法执行')
 
       const chain = []
       let produced = draft
@@ -1109,6 +1105,26 @@ function registerTools(ctx) {
         }
       } else {
         chain.push({ stage: '产出', who: '（调用方提交）', model: '', verdict: '完成', note: '' })
+      }
+
+      // 审核/复核成员在产出之后才解析：第一关就失败时不该因为“缺审核员”再报一次错。
+      const auditor = byName(GATE_AUDITOR) ?? byRole(/审核/)
+      const reviewer = byName(GATE_REVIEWER) ?? byRole(/复核/)
+      if (auditor === undefined || reviewer === undefined) {
+        const missing = auditor === undefined ? '审核' : '复核'
+        return {
+          status: 'error',
+          producer: producerLabel,
+          auditVerdict: '未执行',
+          reviewVerdict: '未执行',
+          rounds: 0,
+          auditFeedback: '',
+          reviewFeedback: '',
+          resubmitHint: '名册缺少' + missing + '成员，流水线无法继续。请先新建一位职责含「' + missing + '」的成员。',
+          finalOutput: produced,
+          chain: JSON.stringify(chain),
+          summary: '【交付流水线】缺少' + missing + '成员，未执行。'
+        }
       }
 
       // —— 第二关：审核 ——

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2.55.0 — 2026-11-07
+
+- 修 STT 400「unsupported audio format」：浏览器录的是 webm/opus，MiniMax 等云厂商不收；
+  现在云端转写前会先用 ffmpeg 转成 **mp3（16k 单声道 64kbps）**，文件名/类型一并改成 .mp3/audio/mpeg；
+  找不到 ffmpeg 时，MiniMax 会给出明确提示（本地 stt / OpenAI 兼容仍可直接用原始 webm）；
+- 新增 `scripts/sync-market.mjs`：打包 → 复制到 market/ → 重写 market/index.json（sha256/大小/时间），
+  本地市场目录与 tgz 随版本同步；
+
 ## 2.54.0 — 2026-11-07
 
 - 侧栏新增批量删除：标题右侧 🗑 进入选择模式，点成员/部门格子打勾（部门=整组），

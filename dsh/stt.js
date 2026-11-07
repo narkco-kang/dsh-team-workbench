@@ -9,9 +9,56 @@
  *
  * 配置：$DSH_HOME/team-workbench/stt-settings.json
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { harnessHome, text } from './team.js'
+
+/** 找 ffmpeg：云厂商多数不收 webm/opus，要先转码。 */
+const FFMPEG_CANDIDATES = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']
+let ffmpegPathCache = null
+async function ffmpegPath() {
+  if (ffmpegPathCache !== null) return ffmpegPathCache
+  for (const candidate of FFMPEG_CANDIDATES) {
+    try { await readFile(candidate); ffmpegPathCache = candidate; return candidate } catch { /* 试下一个 */ }
+  }
+  const found = await new Promise((resolve) => {
+    const child = spawn('ffmpeg', ['-version'], { stdio: 'ignore' })
+    child.on('error', () => resolve(''))
+    child.on('close', (code) => resolve(code === 0 ? 'ffmpeg' : ''))
+  })
+  ffmpegPathCache = found
+  return found
+}
+
+/**
+ * 把浏览器录音（webm/opus）转成云厂商普遍支持的 mp3（16k 单声道）。
+ * 转码失败就返回 null，调用方保留原始音频。
+ */
+export async function convertToMp3(bytes, contentType) {
+  const binary = await ffmpegPath()
+  if (binary.length === 0) return null
+  const stamp = String(process.pid) + '-' + String(Date.now()) + '-' + String(Math.round(Math.random() * 1e6))
+  const input = join(tmpdir(), 'stt-in-' + stamp + (String(contentType).includes('wav') ? '.wav' : '.webm'))
+  const output = join(tmpdir(), 'stt-out-' + stamp + '.mp3')
+  try {
+    await writeFile(input, bytes)
+    const ok = await new Promise((resolve) => {
+      const child = spawn(binary, ['-y', '-loglevel', 'error', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '64k', output])
+      child.on('error', () => resolve(false))
+      child.on('close', (code) => resolve(code === 0))
+    })
+    if (!ok) return null
+    const converted = await readFile(output)
+    return converted.length > 0 ? converted : null
+  } catch {
+    return null
+  } finally {
+    void unlink(input).catch(() => {})
+    void unlink(output).catch(() => {})
+  }
+}
 
 const SETTINGS_FILE = 'stt-settings.json'
 /**
@@ -171,8 +218,22 @@ export async function transcribe(bytes, options = {}) {
   const providerId = PROVIDERS[settings.provider] !== undefined ? settings.provider : 'local'
   const protocol = PROVIDERS[providerId].protocol
   const language = settings.language || 'zh'
+  // 云厂商多数不接受 webm/opus（MiniMax 会直接 400: unsupported audio format），先转成 mp3。
+  let payloadBytes = bytes
+  let payloadType = options.contentType || 'audio/webm'
+  let payloadName = options.filename || 'speech.webm'
+  if (protocol !== 'local') {
+    const mp3 = await convertToMp3(bytes, payloadType)
+    if (mp3 !== null) {
+      payloadBytes = mp3
+      payloadType = 'audio/mpeg'
+      payloadName = payloadName.replace(/\.[a-z0-9]+$/i, '') + '.mp3'
+    } else if (providerId === 'minimax') {
+      throw new Error('这台机器没找到 ffmpeg：MiniMax 不接受浏览器录的 webm，需要先把音频转成 mp3/wav')
+    }
+  }
   const form = new FormData()
-  form.append('file', new Blob([bytes], { type: options.contentType || 'audio/webm' }), options.filename || 'speech.webm')
+  form.append('file', new Blob([payloadBytes], { type: payloadType }), payloadName)
   const headers = {}
   let endpoint = ''
 
