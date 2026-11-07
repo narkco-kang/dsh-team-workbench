@@ -94,11 +94,12 @@ window.fetch = function (url, init) {
     // 仅供截图：按发送后经过的时间伪造「正在接力」的过程。
     var started = window.__DSH_PREVIEW__.sendStart || 0;
     var elapsed = started > 0 ? Date.now() - started : 0;
-    var trail = [{ name: '总管', phase: 'done', ms: 1200 }];
+    var trail = [{ name: '总管', phase: 'done', ms: 1200, summary: '先定范围、上线日、灰度三件事', emoji: '🧭' }];
     var current = '分析师';
-    if (elapsed > 2600) { trail.push({ name: '分析师', phase: 'done', ms: 1400 }); current = '工程师'; }
-    if (elapsed > 4200) { trail.push({ name: '工程师', phase: 'done', ms: 1600 }); current = '审核员'; }
-    trail.push({ name: current, phase: 'thinking', ms: 0 });
+    if (elapsed > 2600) { trail.push({ name: '分析师', phase: 'done', ms: 1400, summary: '两周可行，但必须砍范围', emoji: '📊' }); current = '工程师'; }
+    if (elapsed > 4200) { trail.push({ name: '工程师', phase: 'done', ms: 1600, summary: '两天可以，先做只读版本', emoji: '🛠️' }); current = '审核员'; }
+    var emojiOf = { '分析师': '📊', '工程师': '🛠️', '审核员': '⚖️' };
+    trail.push({ name: current, phase: 'thinking', ms: 0, emoji: emojiOf[current] || '🤖' });
     data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: current, steps: trail, finishedAt: '' } };
     return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
   }

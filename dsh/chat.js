@@ -246,6 +246,19 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
   ].join('\n')
 }
 
+/** 一棒结束后的「一句结论」：去掉 markdown 与回执，取第一句有内容的，最多 60 字。 */
+export function summaryOf(value) {
+  const cleaned = stripReceipts(value)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_~`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (cleaned.length === 0) return ''
+  const parts = cleaned.split(/[。！？!?；]/).filter((part) => part.trim().length > 0)
+  const first = (parts[0] || cleaned).trim()
+  return first.length > 60 ? first.slice(0, 60) + '…' : first
+}
+
 /** 从一段回复里解析 @成员名。 */
 function parseMentions(body, members, exclude) {
   const skip = new Set(exclude)
@@ -290,6 +303,8 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   const step = thread.progress.steps[0]
   step.phase = 'done'
   step.ms = Date.now() - Date.parse(step.startedAt)
+  step.summary = summaryOf(reply.text)
+  step.emoji = member.emoji
   thread.progress.current = ''
   thread.progress.finishedAt = new Date().toISOString()
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
@@ -394,6 +409,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       const step = target.progress.steps[target.progress.steps.length - 1]
       step.phase = 'done'
       step.ms = Date.now() - Date.parse(step.startedAt)
+      step.summary = summaryOf(reply.text)
+      step.emoji = member.emoji
       target.progress.current = ''
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))

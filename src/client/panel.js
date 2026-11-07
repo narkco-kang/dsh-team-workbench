@@ -1521,6 +1521,16 @@ window.__ModuleLoader__.load({
       var thinkingWho = thinkingProgress && thinkingProgress.current
         ? thinkingProgress.current
         : (thinkingProgress && thinkingDone.length > 0 ? thinkingDone[thinkingDone.length - 1] : "");
+      var thinkingLastDone = (function () {
+        if (!thinkingProgress || !Array.isArray(thinkingProgress.steps)) return null;
+        var done = thinkingProgress.steps.filter(function (s) { return s.phase === "done"; });
+        return done.length > 0 ? done[done.length - 1] : null;
+      })();
+      var thinkingEmoji = (function () {
+        if (!thinkingProgress || !Array.isArray(thinkingProgress.steps)) return "";
+        var hit = thinkingProgress.steps.filter(function (s) { return s.name === thinkingWho; })[0];
+        return hit && hit.emoji ? hit.emoji : "";
+      })();
       // 只有「当前这段会话」自己的请求在跑时才显示思考条；切到别的会话不会串台。
       var thinkingHere = busy && busyTarget !== null && target !== null && busyTarget.kind === target.kind && busyTarget.id === target.id;
       var bannerState = useState("");
@@ -1919,12 +1929,15 @@ window.__ModuleLoader__.load({
             h("div", { className: "ats-thinking" + (thinkingHere ? " on" : "") },
               thinkingHere
                 ? [
-                    h("span", { key: "dot", className: "ats-thinking-dot" }),
+                    thinkingEmoji
+                      ? h(Mascot, { key: "ava", member: { id: thinkingWho, name: thinkingWho, emoji: thinkingEmoji }, accent: colorOf({ name: thinkingWho }, 0), size: 16 })
+                      : h("span", { key: "dot", className: "ats-thinking-dot" }),
                     h("span", { key: "who" },
                       "「" + (thinkingWho || (currentRoom ? (currentRoom.adminName || "管理员") : title)) + "」正在思考…"),
-                    thinkingDone.length > 0
+                    thinkingLastDone
                       ? h("span", { key: "trail", className: "ats-thinking-hint" },
-                          " · " + thinkingDone.slice(-3).join(" → ") + (thinkingDone.length > 3 ? " → …" : "") + " 已完成")
+                          " · " + thinkingLastDone.name + (thinkingLastDone.summary ? "：" + thinkingLastDone.summary : " 已完成") +
+                          (thinkingDone.length > 1 ? " · 已 " + thinkingDone.length + " 棒" : ""))
                       : (currentRoom && currentRoom.memberIds && currentRoom.memberIds.length > 2
                           ? h("span", { key: "hint", className: "ats-thinking-hint" },
                               " · " + (currentRoom.memberIds.length > 7 ? "随后按需 @ 成员接力" : "随后最多 @ " + (currentRoom.memberIds.length - 1) + " 位成员接力"))
