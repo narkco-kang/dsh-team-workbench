@@ -1263,8 +1263,9 @@ window.__ModuleLoader__.load({
       var resultsState = useState({});
       var results = resultsState[0];
       var setResults = resultsState[1];
-      var mergeState = useState({ open: false, busy: "" });
+      var mergeState = useState({ open: false, busy: "", error: "" });
       var merge = mergeState[0];
+      var setMergeState = mergeState[1];
       var mergeOpen = merge.open;
       var setMergeOpen = function (next) { setMergeState(function (prev) { return Object.assign({}, prev, { open: next }); }); };
       var mergeDepartment = function (name) {
@@ -1273,10 +1274,12 @@ window.__ModuleLoader__.load({
           method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name })
         }).then(function (res) { return res.json(); }).then(function (payload) {
           if (payload.ok === false) throw new Error(payload.error || "合并失败");
-          return load().then(function () { setMergeState({ open: false, busy: "" }); });
+          setBanner("已把「" + name + "」合并成 1 个部门智能体：" + String(payload.merged) + " 个子智能体，私聊历史 " + String(payload.messages) + " 条。");
+          load();
+          setMergeState({ open: false, busy: "", error: "" });
         }).catch(function (error) {
-          setMergeState(function (prev) { return Object.assign({}, prev, { busy: "" }); });
-          window.alert(String(error && error.message ? error.message : error));
+          var message = String(error && error.message ? error.message : error);
+          setMergeState(function (prev) { return Object.assign({}, prev, { busy: "", error: message }); });
         });
       };
       var bannerState = useState("");
@@ -1565,6 +1568,7 @@ window.__ModuleLoader__.load({
         mergeOpen
           ? h("div", { className: "ats-merge" },
               h("div", { className: "ats-merge-head" }, "把同部门成员合并成一个部门智能体（子智能体保留，私聊历史合并）"),
+              merge.error ? h("div", { className: "ats-note err" }, merge.error) : null,
               (function () {
                 var map = new Map();
                 members.forEach(function (m) {
@@ -1590,7 +1594,44 @@ window.__ModuleLoader__.load({
                   })
                 );
               })(),
-              h("button", { className: "ats-btn tiny", type: "button", style: { marginTop: "6px" }, onClick: function () { setMergeOpen(false); } }, "关闭")
+              h("div", { className: "ats-row", style: { marginTop: "6px", gap: "6px" } },
+                h("button", {
+                  className: "ats-btn tiny primary", type: "button", disabled: merge.busy.length > 0,
+                  onClick: function () {
+                    var names = [];
+                    var map = new Map();
+                    members.forEach(function (m) {
+                      var name = m.departmentName || "";
+                      if (name.length === 0) return;
+                      if (!map.has(name)) map.set(name, []);
+                      map.get(name).push(m);
+                    });
+                    map.forEach(function (list, name) { if (list.length >= 2) names.push(name); });
+                    if (names.length === 0) { setBanner("没有可合并的部门。"); return; }
+                    if (!window.confirm("把 " + String(names.length) + " 个部门全部合并？合并后每个部门只剩 1 个成员，私聊历史会合并。")) return;
+                    setMergeState(function (prev) { return Object.assign({}, prev, { busy: "全部" }); });
+                    var run = function (index, total) {
+                      if (index >= names.length) {
+                        setBanner("已合并 " + String(total) + " 个部门。");
+                        load();
+                        setMergeState({ open: false, busy: "", error: "" });
+                        return Promise.resolve();
+                      }
+                      return fetch("/api/team-workbench/chats/merge", {
+                        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: names[index] })
+                      }).then(function (res) { return res.json(); }).then(function (payload) {
+                        if (payload.ok === false) throw new Error(names[index] + "：" + payload.error);
+                        return run(index + 1, total + 1);
+                      });
+                    };
+                    run(0, 0).catch(function (error) {
+                      setMergeState(function (prev) { return Object.assign({}, prev, { busy: "" }); });
+                      setBanner("合并中断：" + String(error && error.message ? error.message : error));
+                    });
+                  }
+                }, merge.busy === "全部" ? "全部合并中…" : "全部合并"),
+                h("button", { className: "ats-btn tiny", type: "button", onClick: function () { setMergeOpen(false); } }, "关闭")
+              )
             )
           : null,
 
@@ -1665,7 +1706,7 @@ window.__ModuleLoader__.load({
       var targetState = useState("");
       var target = targetState[0];
       var setTarget = targetState[1];
-      var deptState = useState({ busy: false, mode: "rotate", importMode: "members", catalog: [], defaults: null });
+      var deptState = useState({ busy: false, mode: "rotate", importMode: "department", catalog: [], defaults: null });
       var dept = deptState[0];
       var setDept = deptState[1];
 
@@ -2262,6 +2303,11 @@ window.__ModuleLoader__.load({
       }, []);
 
       useEffect(function () { loadOverview(); }, [loadOverview]);
+      // 定期刷新会话概览：团队页合并部门、新建成员后，侧栏不用切页也能更新。
+      useEffect(function () {
+        var timer = setInterval(function () { loadOverview(); }, 8000);
+        return function () { clearInterval(timer); };
+      }, [loadOverview]);
 
       // 总管：侧栏置顶显示，建群时默认当管理员。
       useEffect(function () {

@@ -23,7 +23,10 @@ const state = {
   ok: true,
   pluginVersion: '1.2.0',
   version: 3,
-  members,
+  members: members.map((m, i) => Object.assign({}, m, {
+    departmentName: i >= 9 ? (i >= 14 ? '营销部' : '测试部') : (i === 8 ? '安全部' : ''),
+    subAgentCount: 0
+  })),
   groups,
   preset: '',
   presets: [{ id: 'project-department', name: '项目部', description: '', groups: 6, members: 15 }],
@@ -155,6 +158,7 @@ window.fetch = function (url, init) {
     { id: 'lib1', name: '示例一', dataUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#7c3aed"/><circle cx="32" cy="32" r="16" fill="#fff"/></svg>') },
     { id: 'lib2', name: '示例二', dataUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#f97316"/><rect x="16" y="16" width="32" height="32" rx="8" fill="#fff"/></svg>') }
   ] };
+  else if (u.indexOf('/api/team-workbench/chats/merge') === 0) data = { ok: true, memberId: 'm-dept', name: '测试部', merged: 5, messages: 3 };
   else if (u.indexOf('/api/team-workbench/chats') === 0) data = window.__DSH_PREVIEW__.chats;
   else data = window.__DSH_PREVIEW__.state;
   return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
