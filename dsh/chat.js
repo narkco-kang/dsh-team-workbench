@@ -711,6 +711,25 @@ export async function applyRoomAction(body) {
     await saveChats(chats)
     return { deleted: id }
   }
+  // 拖拽合并群聊：把 source 的成员并入 target，消息接着 target 的时间线，然后删掉 source。
+  if (action === 'merge') {
+    const sourceId = text(body?.sourceId)
+    const targetId = text(body?.targetId)
+    if (sourceId.length === 0 || targetId.length === 0) return { error: '缺少 sourceId/targetId' }
+    if (sourceId === targetId) return { error: '不能合并到它自己' }
+    const source = chats.rooms.find((room) => room.id === sourceId)
+    const target = chats.rooms.find((room) => room.id === targetId)
+    if (source === undefined || target === undefined) return { error: '找不到群聊' }
+    if (source.id === CHIEF_ROOM_ID) return { error: '总管群不能合并' }
+    const merged = target.memberIds.slice()
+    for (const id of source.memberIds) if (known.has(id) && !merged.includes(id)) merged.push(id)
+    target.memberIds = merged
+    target.messages = target.messages.concat(source.messages || [])
+    target.updatedAt = new Date().toISOString()
+    chats.rooms = chats.rooms.filter((room) => room.id !== sourceId)
+    return { ok: true, target: target.id, moved: merged.length, messages: (source.messages || []).length }
+  }
+
   if (action === 'update') {
     const room = chats.rooms.find((entry) => entry.id === text(body?.id))
     if (room === undefined) return { error: '找不到该群聊' }

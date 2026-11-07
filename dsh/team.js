@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.64.0'
+const PLUGIN_VERSION = '2.65.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1518,6 +1518,19 @@ async function applyMemberAction(store, body, ctx) {
     store.members = store.members.filter((m) => m.id !== id)
     if (store.chiefId === id) store.chiefId = ''
     return store.members.length === before ? '找不到该成员' : null
+  }
+
+  // 部门子智能体的批量增删改：客户端把整份 subs 数组发上来，服务端统一 normalize 后替换。
+  if (action === 'subs-set') {
+    const deptId = text(body.deptId)
+    const dept = store.members.find((m) => m.id === deptId && m.department !== null)
+    if (dept === undefined) return '找不到部门智能体'
+    const rows = Array.isArray(body.subs) ? body.subs : []
+    const subs = rows.map((row) => normalizeSubAgent(row, 0)).filter((sub) => sub.name.length > 0)
+    if (subs.length === 0) return '部门至少保留 1 个子智能体'
+    dept.department = { name: dept.department.name, subAgents: subs }
+    dept.role = '部门智能体 · ' + String(subs.length) + ' 个子智能体'
+    return null
   }
 
   // 拖拽：把一个成员变成某个部门的子智能体（成员本身被合并掉，聊天记录保留在会话里）。

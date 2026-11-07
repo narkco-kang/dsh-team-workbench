@@ -235,6 +235,12 @@ window.__ModuleLoader__.load({
       ".bt-dept-name{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
       ".bt-dept-count{font-size:10.5px;opacity:.65;}",
       ".ats-merge{margin:6px 0 8px;padding:8px 10px;border:1px solid var(--bt-line);border-radius:10px;background:var(--bt-hover);}",
+      ".ats-modal{position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;}",
+      ".ats-modal-card{width:min(920px,96vw);max-height:86vh;overflow:auto;background:var(--bt-card,#fff);border-radius:14px;box-shadow:0 24px 60px -18px rgba(15,23,42,.5);padding:14px 16px;}",
+      ".ats-modal-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;}",
+      ".ats-modal-title{font-size:14px;font-weight:600;}",
+      ".ats-subs-table{display:flex;flex-direction:column;gap:6px;}",
+      ".ats-subs-row{display:flex;align-items:center;gap:6px;}",
       ".ats-merge-head{font-size:12px;opacity:.75;margin-bottom:6px;}",
       ".ats-merge-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;}",
       ".ats-merge-row{display:flex;align-items:center;gap:8px;padding:4px 2px;}",
@@ -846,6 +852,98 @@ window.__ModuleLoader__.load({
     }
     //#endregion
 
+    // 部门子智能体的批量增删改查：一个弹层里改完一次性提交（action=subs-set）。
+    function SubsEditor(props) {
+      var member = props.member;
+      var initial = (member.department && member.department.subAgents ? member.department.subAgents : []).map(function (sub) {
+        return { id: sub.id, name: sub.name, role: sub.role, emoji: sub.emoji, provider: sub.provider, model: sub.model, reasoningEffort: sub.reasoningEffort || "", roleRef: sub.roleRef };
+      });
+      var rowsState = useState(initial);
+      var rows = rowsState[0];
+      var setRows = rowsState[1];
+      var selState = useState({});
+      var sel = selState[0];
+      var setSel = selState[1];
+      var pasteState = useState({ open: false, text: "" });
+      var paste = pasteState[0];
+      var setPaste = pasteState[1];
+      var busyState = useState(false);
+      var busy = busyState[0];
+      var setBusy = busyState[1];
+
+      var options = [{ value: "", label: "未配模型" }];
+      (props.catalog || []).forEach(function (row) {
+        (row.models || []).forEach(function (model) { options.push({ value: row.id + "/" + model.id, label: row.displayName + " · " + model.name }); });
+      });
+      var patchRow = function (index, patch) {
+        setRows(function (prev) { return prev.map(function (row, i) { return i === index ? Object.assign({}, row, patch) : row; }); });
+      };
+      var selectedIndexes = Object.keys(sel).filter(function (key) { return sel[key] === true; }).map(Number);
+      var deleteSelected = function () {
+        if (selectedIndexes.length === 0) return;
+        setRows(function (prev) { return prev.filter(function (row, index) { return selectedIndexes.indexOf(index) < 0; }); });
+        setSel({});
+      };
+      var addRow = function () {
+        setRows(function (prev) { return prev.concat([{ id: "", name: "", role: "", emoji: "🤖", provider: "", model: "", reasoningEffort: "", roleRef: { library: "", id: "", version: "" } }]); });
+      };
+      var applyPaste = function () {
+        var lines = paste.text.split("\n").map(function (line) { return line.trim(); }).filter(function (line) { return line.length > 0; });
+        if (lines.length === 0) { setPaste({ open: false, text: "" }); return; }
+        var added = lines.map(function (line) {
+          var parts = line.split("|").map(function (part) { return part.trim(); });
+          var model = (parts[3] || "").split("/");
+          return { id: "", name: parts[0] || "子智能体", role: parts[1] || "通用助手", emoji: parts[2] || "🤖", provider: model[0] || "", model: model[1] || "", reasoningEffort: "", roleRef: { library: "", id: "", version: "" } };
+        });
+        setRows(function (prev) { return prev.concat(added); });
+        setPaste({ open: false, text: "" });
+      };
+      var save = function () {
+        if (busy) return;
+        setBusy(true);
+        props.onSave(rows.map(function (row) { return { id: row.id, name: row.name, role: row.role, emoji: row.emoji, provider: row.provider, model: row.model, reasoningEffort: row.reasoningEffort }; }), function () { setBusy(false); });
+      };
+      return h("div", { className: "ats-modal" },
+        h("div", { className: "ats-modal-card" },
+          h("div", { className: "ats-modal-head" },
+            h("span", { className: "ats-modal-title" }, "🏢 " + (member.department ? member.department.name : member.name) + " · 子智能体 " + String(rows.length)),
+            h("span", { className: "ats-spacer" }),
+            h("button", { className: "ats-btn tiny", type: "button", onClick: addRow }, "＋ 添加"),
+            h("button", { className: "ats-btn tiny", type: "button", onClick: function () { setPaste({ open: !paste.open, text: paste.text }); } }, "📋 批量粘贴"),
+            h("button", { className: "ats-btn tiny danger", type: "button", disabled: selectedIndexes.length === 0, onClick: deleteSelected }, "删除选中 " + String(selectedIndexes.length)),
+            h("button", { className: "ats-btn tiny primary", type: "button", disabled: busy, onClick: save }, busy ? "保存中…" : "保存"),
+            h("button", { className: "ats-btn tiny", type: "button", onClick: props.onClose }, "关闭")
+          ),
+          paste.open
+            ? h("div", { className: "ats-field" },
+                h("span", { className: "ats-label" }, "每行一个：名称 | 职责 | emoji | provider/model"),
+                h("textarea", { className: "ats-textarea", rows: 4, value: paste.text, onChange: function (e) { setPaste({ open: true, text: e.target.value }); } }),
+                h("button", { className: "ats-btn tiny primary", type: "button", onClick: applyPaste }, "导入")
+              )
+            : null,
+          h("div", { className: "ats-subs-table" },
+            rows.map(function (row, index) {
+              var current = row.provider.length > 0 && row.model.length > 0 ? row.provider + "/" + row.model : "";
+              return h("div", { key: row.id || "row-" + String(index), className: "ats-subs-row" },
+                h("input", { type: "checkbox", checked: sel[index] === true, onChange: function (e) { setSel(function (prev) { return Object.assign({}, prev, { [index]: e.target.checked }); }); } }),
+                h("input", { className: "ats-input", style: { width: "60px" }, value: row.emoji, onChange: function (e) { patchRow(index, { emoji: e.target.value }); } }),
+                h("input", { className: "ats-input", style: { flex: "1 1 140px" }, placeholder: "名称", value: row.name, onChange: function (e) { patchRow(index, { name: e.target.value }); } }),
+                h("input", { className: "ats-input", style: { flex: "1 1 120px" }, placeholder: "职责", value: row.role, onChange: function (e) { patchRow(index, { role: e.target.value }); } }),
+                h("select", { className: "ats-select", style: { flex: "1 1 180px" }, value: current, onChange: function (e) {
+                  var parts = e.target.value.split("/");
+                  patchRow(index, { provider: parts[0] || "", model: parts[1] || "" });
+                } }, options.map(function (option) { return h("option", { key: option.value, value: option.value }, option.label); })),
+                h("button", { className: "ats-btn tiny", type: "button", title: "删除这一行", onClick: function () {
+                  setRows(function (prev) { return prev.filter(function (item, i) { return i !== index; }); });
+                  setSel({});
+                } }, "🗑")
+              );
+            })
+          )
+        )
+      );
+    }
+
     function MemberCard(props) {
       var member = props.member;
       var busy = props.busy;
@@ -1110,7 +1208,9 @@ window.__ModuleLoader__.load({
               uploadError ? h("div", { className: "ats-note err" }, uploadError) : null,
               member.department !== null && member.department !== undefined
                 ? h("div", { className: "ats-field" },
-                    h("span", { className: "ats-label" }, "部门子智能体（" + String(member.department.subAgents.length) + "）"),
+                    h("span", { className: "ats-label" }, "部门子智能体（" + String(member.department.subAgents.length) + "）",
+                      h("button", { className: "ats-btn tiny", type: "button", style: { marginLeft: "6px" }, onClick: function () { props.onManageSubs(member); } }, "批量管理")
+                    ),
                     h("div", { className: "ats-dep-subs" },
                       member.department.subAgents.map(function (sub) {
                         var current = sub.provider.length > 0 && sub.model.length > 0 ? sub.provider + "/" + sub.model : "";
@@ -1439,6 +1539,9 @@ window.__ModuleLoader__.load({
         };
         metaStep();
       };
+      var subsOpenState = useState("");
+      var subsOpen = subsOpenState[0];
+      var setSubsOpen = subsOpenState[1];
       var mergeState = useState({ open: false, busy: "", error: "" });
       var merge = mergeState[0];
       var setMergeState = mergeState[1];
@@ -1672,6 +1775,7 @@ window.__ModuleLoader__.load({
             setSelected(function (prev) { var next = Object.assign({}, prev); if (next[id]) delete next[id]; else next[id] = true; return next; });
           },
           onSave: function (draft, done) { mutate("save", { action: "upsert", member: draft }, "已保存「" + draft.name + "」。", done); },
+          onManageSubs: function (m) { setSubsOpen(m.id); },
           isChief: snap.chiefId === member.id,
           onChief: function (m, make) { mutate("save", { action: make ? "chief" : "chief-clear", id: m.id }, make ? "「" + m.name + "」现在是总管。" : "已取消总管。"); },
           onDelete: function (m) { mutate("save", { action: "delete", id: m.id }, "已删除「" + m.name + "」。"); },
@@ -1780,6 +1884,24 @@ window.__ModuleLoader__.load({
         ),
         probeAll.report.length > 0
           ? h("div", { className: "ats-sub", style: { color: probeAll.report.indexOf("已删除") >= 0 ? "#b45309" : "#15803d" } }, probeAll.report)
+          : null,
+        subsOpen.length > 0 && members.filter(function (m) { return m.id === subsOpen; })[0] !== undefined
+          ? h(SubsEditor, {
+              member: members.filter(function (m) { return m.id === subsOpen; })[0],
+              catalog: snap.catalog,
+              onClose: function () { setSubsOpen(""); },
+              onSave: function (subs, done) {
+                postMembers({ action: "subs-set", deptId: subsOpen, subs: subs }).then(function (data) {
+                  applyState(data);
+                  setBanner("已保存 " + String(subs.length) + " 个子智能体。");
+                  setSubsOpen("");
+                  if (typeof done === "function") done();
+                }).catch(function (error) {
+                  setBanner("保存失败：" + String(error && error.message ? error.message : error));
+                  if (typeof done === "function") done();
+                });
+              }
+            })
           : null,
         mergeOpen
           ? h("div", { className: "ats-merge" },
@@ -2679,6 +2801,22 @@ window.__ModuleLoader__.load({
       var dragState = useState("");
       var dragId = dragState[0];
       var setDragId = dragState[1];
+      var dragRoomState = useState("");
+      var dragRoomId = dragRoomState[0];
+      var setDragRoomId = dragRoomState[1];
+      var mergeRoom = function (room) {
+        if (dragRoomId.length === 0 || dragRoomId === room.id || dropBusy) return;
+        setDropBusy(true);
+        postChatRoom({ action: "merge", sourceId: dragRoomId, targetId: room.id })
+          .then(function (payload) {
+            if (payload.ok === false) throw new Error(payload.error || "合并失败");
+            setDragRoomId("");
+            var movedCount = typeof payload.moved === "number" ? payload.moved : 0;
+            var movedMessages = typeof payload.messages === "number" ? payload.messages : 0;
+            finishDrop("已把群聊合并进「" + room.name + "」：成员 " + String(movedCount) + " 人，消息 " + String(movedMessages) + " 条。");
+          })
+          .catch(function (error) { setDropBusy(false); setDragRoomId(""); setBanner("合并群聊失败：" + String(error && error.message ? error.message : error)); });
+      };
       var dropBusyState = useState(false);
       var dropBusy = dropBusyState[0];
       var setDropBusy = dropBusyState[1];
@@ -2757,10 +2895,13 @@ window.__ModuleLoader__.load({
           key: "room-" + room.id, type: "button", className: "bt-row",
           "aria-current": on ? "page" : undefined,
           onClick: function () { pickRoom(room.id); },
-          title: "把智能体拖到这里 → 加入群聊",
-          onDragOver: function (e) { if (dragId.length > 0) { e.preventDefault(); e.currentTarget.classList.add("drag-over"); } },
+          title: "把智能体拖到这里 → 加入群聊；把别的群聊拖到这里 → 合并进来",
+          draggable: true,
+          onDragStart: function (e) { e.dataTransfer.setData("text/plain", room.id); e.dataTransfer.effectAllowed = "move"; setDragRoomId(room.id); },
+          onDragEnd: function () { setDragRoomId(""); },
+          onDragOver: function (e) { if (dragId.length > 0 || dragRoomId.length > 0) { e.preventDefault(); e.currentTarget.classList.add("drag-over"); } },
           onDragLeave: function (e) { e.currentTarget.classList.remove("drag-over"); },
-          onDrop: function (e) { e.preventDefault(); e.currentTarget.classList.remove("drag-over"); joinRoom(room); }
+          onDrop: function (e) { e.preventDefault(); e.currentTarget.classList.remove("drag-over"); if (dragRoomId.length > 0) mergeRoom(room); else joinRoom(room); }
         },
           h("span", { className: "bt-mark", style: { width: "36px", height: "36px" } },
             h("span", { className: "bt-stack", style: { position: "relative", display: "block", width: "36px", height: "36px" } },
