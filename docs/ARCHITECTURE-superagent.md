@@ -4,25 +4,34 @@
 
 ## 结论
 
-智能体之间的交互（成员 ↔ 成员、主管 ↔ 子智能体）采用同一套骨架，不再是一问一答的临时调用：
+现在**核心概念全部落地**，只是把「工作流域」翻译成「聊天域」：
 
 | superagent 概念 | 本插件的落点 | 状态 |
 | --- | --- | --- |
-| Executor / 持久 worker session | 每个成员固定 `childId = team-<memberId>` 复用同一个子会话，支持后续消息与冷恢复 | ✅ 2.78.0 |
-| Assignment | 每次派发记一条 usage（成员、路由、结果、耗时），等价于 assignment 记录 | ✅ |
-| Inbox | 忙时收到的消息写 `team-workbench/inbox.json`，本轮结束后自动续跑；运行中插话走 steer | ✅ 2.78.0 |
-| Report | 子智能体结果作为报告回写会话，再由主管汇总（部门） | ✅ |
-| Ticket / Mandate / Eval | 尚未引入：本插件面向对话，不按 Ticket 授权；选人等价于 Eval 的简化版（管理员决策 + 关键词兜底） | ⬜ |
-| Thread / Subscription | 会话本身就是 Thread；成员只订阅自己参与的群聊 | ⬜（简化） |
+| Executor / 持久 worker session | 每个成员固定 `childId = team-<memberId>`，复用同一子会话，支持后续消息与冷恢复 | ✅ |
+| Ticket | 用户每一条消息 = 一张工单（`tickets.json`），有开/结状态与报告 | ✅ 2.79.0 |
+| Mandate | 用户消息本身即授权：记录发起人、范围（会话/成员）、所用策略版本、时间 | ✅ 2.79.0 |
+| Eval | 开工前评估：停止词→关单、会话不在白名单→拒绝、策略停用→不可用、其余受理 | ✅ 2.79.0 |
+| Assignment | 每张工单下每个成员的一次执行（成员、开始/结束、成败、耗时） | ✅ |
+| Thread | 一个会话（群 id 或私聊成员 id）；工单挂在 Thread 上 | ✅ |
+| Subscription | 群成员即订阅者：群消息 fan-out 给成员；私聊只给该成员 | ✅（简化） |
+| Policy | `policy.json`，带版本号；工单记录受理时的版本，策略变更只影响之后开的新单 | ✅ 2.79.0 |
+| Report | 成员结果回写工单，会话里显示最终答复 | ✅ |
 
-## 明确不采用的部分
+## 与它的差异（刻意保留）
 
-- **Ticket 授权模型**：需要人工审批链路，聊天场景过重；
-- **Policy 版本化**：本插件用 settings/team.json 代替；
-- **多 Source 接入**（GitHub / 飞书）：不在范围内。
+1. **不阻塞等待审批**：它的 Ticket 需要人授权才开工；聊天里用户消息就是授权，所以 Mandate 直接由消息生成。
+2. **Eval 是规则而不是模型评估**：聊天高频，逐条再跑一次模型评估不划算；规则（停止词/白名单/策略开关）足够覆盖。
+3. **无常驻主会话通知**：它的 Notices 给主 Session 推送后台事件；我们直接把工单状态回写到会话气泡与 `/tickets` 接口。
+
+## 接口
+
+- `GET /api/team-workbench/tickets?threadKind=group&threadId=...` — 工单 + 当前策略
+- `POST /api/team-workbench/tickets` — `{action:'close', id, report}` 或 `{action:'policy', patch:{...}}`
 
 ## 关键实现位置
 
-- 持久会话与 steer：`dsh/team.js` 的 `runOnRoute` / `steerActive`；
-- 收件箱：`dsh/chat.js` 的 `enqueueInbox` / `takeInbox` / `settle`；
-- 派发记录：`team-workbench/usage.json`。
+- 工单/授权/评估/策略：`dsh/tickets.js`
+- 持久会话与 steer：`dsh/team.js` 的 `runOnRoute` / `steerActive`
+- 收件箱：`dsh/chat.js` 的 `enqueueInbox` / `takeInbox` / `settle`
+- 派发记录：`team-workbench/usage.json`（assignment 遥测）

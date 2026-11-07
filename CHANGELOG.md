@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2.79.0 — 2026-11-08
+
+补齐 superagent 的工单域：
+- Ticket/Mandate：每条用户消息开一张工单，记授权人、范围、策略版本；
+- Eval：停止词关单、会话白名单、策略开关三种判定；
+- Assignment/Report：每次成员执行记入工单，结束时回写报告；
+- Policy：policy.json 带版本，变更只影响之后的新单；
+- 新增 GET/POST /tickets 接口。
+
 ## 2.78.0 — 2026-11-08
 
 对齐 dsh-superagent 的交互架构：

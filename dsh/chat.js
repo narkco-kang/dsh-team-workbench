@@ -46,6 +46,7 @@ import {
   slotOf
 } from './memory.js'
 import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
+import { addAssignment, endTicket, evaluate, finishAssignment, listTickets, loadPolicy, openTicket, savePolicy, stopThread } from './tickets.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const MERGE_ROUTE = ROUTE_BASE + '/chats/merge'
@@ -58,6 +59,7 @@ const STT_ROUTE = ROUTE_BASE + '/stt'
 const UPLOAD_ROUTE = ROUTE_BASE + '/upload'
 const SCHEDULE_ROUTE = ROUTE_BASE + '/schedules'
 const TTS_ROUTE = ROUTE_BASE + '/tts'
+const TICKETS_ROUTE = ROUTE_BASE + '/tickets'
 /** 总管台：用户与总管对接的固定会话；总管再 @ 成员把任务派下去。 */
 const CHIEF_ROOM_ID = 'chief-desk'
 const CHIEF_ROOM_NAME = '总管 · 用户对接'
@@ -916,13 +918,24 @@ export function apply(ctx) {
         }
         return json({ ok: false, error: '该成员正在回复上一条消息' }, 409)
       }
+      const verdict = await evaluate({ text: userText, threadKind: 'private', threadId: member.id })
+      if (verdict.verdict === 'stop') {
+        await stopThread('private', member.id)
+        return json({ ok: false, error: '已停止该会话未结束的工单' }, 409)
+      }
+      if (verdict.verdict !== 'accept') return json({ ok: false, error: verdict.reason || '评估未通过' }, 409)
+      const ticket = await openTicket({ threadKind: 'private', threadId: member.id, actor: 'user', text: userText })
       busy.add(key)
       setSteerTarget(key)
       try {
         // 不把 HTTP 请求的 signal 传给模型调用：客户端切页/断开时，生成仍应继续并落盘，
         // 否则「切走再回来」会看到会话被中断、没有结果。
+        const assignment = await addAssignment(ticket.id, member.id, member.name)
+        const started = Date.now()
         const result = await sendPrivate(ctx, parent, member, userText, undefined)
-        return json({ ok: true, ...result })
+        await finishAssignment(assignment, { ok: result.stopReason === 'completed', ms: Date.now() - started })
+        await endTicket(ticket.id, text(result.messages?.[result.messages.length - 1]?.text ?? ''))
+        return json({ ok: true, ticketId: ticket.id, ...result })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       } finally {
@@ -952,6 +965,13 @@ export function apply(ctx) {
       const queuedRoom = queuedChats.rooms.find((entry) => entry.id === room.id)
       return json({ ok: true, queued: true, messages: Array.isArray(queuedRoom?.messages) ? queuedRoom.messages : [] })
     }
+    const verdict = await evaluate({ text: userText, threadKind: 'group', threadId: room.id })
+    if (verdict.verdict === 'stop') {
+      const stopped = await stopThread('group', room.id)
+      return json({ ok: false, error: '已停止该群 ' + String(stopped) + ' 张未结束的工单' }, 409)
+    }
+    if (verdict.verdict !== 'accept') return json({ ok: false, error: verdict.reason || '评估未通过' }, 409)
+    const ticket = await openTicket({ threadKind: 'group', threadId: room.id, actor: 'user', text: userText })
     busy.add(key)
     setSteerTarget(key)
     try {
@@ -961,6 +981,14 @@ export function apply(ctx) {
       const settle = async () => {
         busy.delete(key)
         clearSteerTarget(key)
+        try {
+          const doneChats = await loadChats()
+          const doneRoom = doneChats.rooms.find((entry) => entry.id === room.id)
+          const last = Array.isArray(doneRoom?.messages) ? doneRoom.messages[doneRoom.messages.length - 1] : undefined
+          await endTicket(ticket.id, text(last?.text ?? ''))
+        } catch (error) {
+          console.warn('[team-workbench] 工单收尾失败：' + String(error))
+        }
         // 收件箱还有话就接着跑（不阻塞当前请求）。
         try {
           const pending = await takeInbox(key)
@@ -1538,6 +1566,33 @@ function registerChatTools(ctx) {
         return new Response(Buffer.from(hex, 'hex'), { status: 200, headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' } })
       } catch (error) {
         return json({ ok: false, error: String(error), fallback: 'browser' }, 500)
+      }
+    }
+  }))
+
+  // ── 工单 / 策略：查看、关闭、改策略（对齐 superagent 的 Ticket 与 Policy）──
+  extraDisposers.push(ctx.connection.fetch.register({
+    path: TICKETS_ROUTE,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      try {
+        if (request.method === 'GET') {
+          const url = new URL(request.url)
+          const threadKind = url.searchParams.get('threadKind') || undefined
+          const threadId = url.searchParams.get('threadId') || undefined
+          const limit = Number(url.searchParams.get('limit') || 30)
+          return json({ ok: true, policy: await loadPolicy(), tickets: await listTickets(threadKind, threadId, limit) })
+        }
+        const body = await readJson(request)
+        const action = text(body?.action) || 'close'
+        if (action === 'policy') return json({ ok: true, policy: await savePolicy(body?.patch !== null && typeof body?.patch === 'object' ? body.patch : {}) })
+        const id = text(body?.id)
+        if (id.length === 0) return json({ ok: false, error: '缺少工单 id' }, 400)
+        const ended = await endTicket(id, text(body?.report) || '手动结束')
+        return json({ ok: ended !== undefined, ticket: ended })
+      } catch (error) {
+        return json({ ok: false, error: String(error) }, 500)
       }
     }
   }))
