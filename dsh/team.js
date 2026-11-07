@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.80.3'
+const PLUGIN_VERSION = '2.80.4'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -600,6 +600,17 @@ async function withRoleInstructions(member) {
   }
 }
 
+/** 把失败原因归到可统计的类别，便于按 provider/模型分桶。 */
+export function classifyError(value) {
+  const text = String(value || '').toLowerCase()
+  if (text.includes('already exists')) return 'control_plane'
+  if (text.includes('abort') || text.includes('timeout') || text.includes('timed out') || text.includes('econnreset')) return 'transport'
+  if (text.includes('401') || text.includes('403') || text.includes('unauthorized') || text.includes('invalid api key')) return 'auth'
+  if (text.includes('429') || text.includes('quota') || text.includes('insufficient')) return 'quota'
+  if (text.includes('model not found') || text.includes('not allowed') || text.includes('no llm providers')) return 'config'
+  return 'unknown'
+}
+
 /** 兜底路由：跨服务商，避免同一家整体故障时兜底也跟着失效。 */
 function fallbackRoutesFor(primaryProvider) {
   const primary = text(primaryProvider)
@@ -821,12 +832,22 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
       routeId: route.id,
       ok,
       stopReason: result.stopReason,
+      attemptIndex: attempts.length + 1,
+      attemptTotal: candidates.length,
+      routeSource: attempts.length === 0 ? 'primary' : 'fallback',
+      errorClass: ok ? '' : classifyError(result.detail ?? result.stopReason),
+      ms: Date.now() - started,
       // 带上失败原因：一次派发可能试多条路由，只有「全部失败」时才有汇总诊断，
       // 失败但后来回退成功的那些尝试以前不带原因，排查时只能靠猜。
       detail: ok ? '' : String(result.detail ?? '').slice(0, 400)
     })
     last = { ...result, provider: route.provider, model: route.model }
-    await recordUsage({ at: new Date().toISOString(), memberId: member.id, routeId: route.id, provider: route.provider, model: route.model, ok, ms: Date.now() - started })
+    await recordUsage({
+      at: new Date().toISOString(), memberId: member.id, routeId: route.id,
+      provider: route.provider, model: route.model, ok, ms: Date.now() - started,
+      attemptIndex: attempts.length, attemptTotal: candidates.length,
+      errorClass: ok ? '' : classifyError(result.detail ?? result.stopReason)
+    })
     // 成功、或已拿到正文（例如被截断）都不再回退
     if (ok || result.stopReason === 'completed') return { ...last, attempts }
   }
@@ -835,9 +856,10 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
   let detail = last?.detail ?? ''
   try {
     const verdict = await probeRoute(ctx, failing)
+    const upstream = classifyError(detail || '')
     const summary = verdict.ok
-      ? '路由探测通过（' + routeLabel(failing) + '）；失败发生在上游模型调用，请检查该服务商的账号/额度或稍后重试。'
-      : '路由探测失败：' + (verdict.error || '未知原因') + (verdict.code ? '（' + verdict.code + '）' : '')
+      ? '上游模型调用失败（类别：' + upstream + '；路由 ' + routeLabel(failing) + ' 本身可达）。可稍后重试，或换路由。'
+      : '路由不可达：' + (verdict.error || '未知原因') + (verdict.code ? '（' + verdict.code + '）' : '')
     detail = detail.length > 0 ? summary + ' 原始诊断：' + detail : summary
   } catch { /* 探测失败不影响原始诊断 */ }
   const base = last ?? { childSessionId: '', stopReason: 'error', output: '', provider: '', model: '' }

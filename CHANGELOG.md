@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2.80.4 — 2026-11-08
+
+- 失败可归因：attempts 增加 attemptIndex/attemptTotal/routeSource/errorClass/ms，
+  usage.json 同步记录 errorClass（transport/control_plane/auth/quota/config/unknown）；
+- 修误导文案：不再把上游失败写成「路由探测通过」，改为「上游模型调用失败（类别：…）」。
+
 ## 2.80.3 — 2026-11-08
 
 - 修部门派发崩溃：runDepartmentMember 各返回路径补 attempts，工具层对缺失再兜底空数组
