@@ -101,9 +101,13 @@ function ensureChiefRoom(chats, store) {
   // 用户改过的应答方式/接力层数不再被覆盖；只有缺省时才补默认值。
   if (!RESPONDERS.includes(text(room.responder))) { room.responder = 'lead'; changed = true }
   if (!Number.isSafeInteger(Number(room.relayDepth))) { room.relayDepth = 1; changed = true }
-  // 成员：保留用户手工加入的子智能体（sub: 前缀），只同步顶层成员的增删。
+  // 成员：保留用户手工加入的子智能体（sub: 前缀）。
+  // 已经有子智能体时，总管台就按「主管 + 子智能体」组群，不再把本机 bot 全塞进来
+  // （全员轮流模式下每多一个人就多一次串行调用）。
   const kept = Array.isArray(room.memberIds) ? room.memberIds.filter((id) => text(id).startsWith('sub:')) : []
-  const wanted = [...memberIds, ...kept.filter((id) => !memberIds.includes(id))]
+  const wanted = kept.length > 0
+    ? [adminId, ...kept.filter((id) => id !== adminId)]
+    : [...memberIds, ...kept]
   if (room.memberIds.length !== wanted.length || room.memberIds.some((id, index) => id !== wanted[index])) {
     room.memberIds = wanted
     changed = true
