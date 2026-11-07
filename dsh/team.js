@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.1.2'
+const PLUGIN_VERSION = '3.2.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -816,15 +816,24 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       '用户任务：',
       String(task).slice(0, 1200),
       '',
-      '只输出 2–3 句结论（不超过 120 字），不要寒暄、不要复述任务、不要列清单。',
-      '不需要写代码；若必须调用 run_code，请用 ES module 语法（import / await），不要用 require。'
+      '只输出 2–3 句纯文本结论（不超过 120 字），不要寒暄、不要复述任务、不要列清单。',
+      '禁止调用任何工具：不要调用 run_code，也不要读写文件；直接给结论。'
     ].filter((line) => line.length > 0).join('\n')
     try {
       // 每个子智能体最多 30 秒；一个慢成员不能拖住整轮汇总。
-      const result = await Promise.race([
+      const attempt = () => Promise.race([
         dispatchToMember(ctx, parent, target, prompt, signal),
         new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub timeout', attempts: [] }), 30000))
       ])
+      let result = await attempt()
+      // 常见失败：模型只发了工具调用，没有文字。补一次「只要纯文本」的重试。
+      if (text(result.output).trim().length === 0) {
+        const retry = await Promise.race([
+          dispatchToMember(ctx, parent, target, prompt + '\n\n（上一次没有产出文字：这次只输出纯文本结论，禁止调用任何工具。）', signal),
+          new Promise((resolve) => setTimeout(() => resolve({ output: '', stopReason: 'timeout', detail: 'sub retry timeout', attempts: [] }), 20000))
+        ])
+        if (text(retry.output).trim().length > 0) result = retry
+      }
       // 流式：每个子智能体一产出就贴到群里，不等其他人，也不等主管汇总。
       if (hooks !== undefined && typeof hooks.onSubResult === 'function' && text(result.output).trim().length > 0) {
         await hooks.onSubResult(sub, text(result.output)).catch(() => undefined)
