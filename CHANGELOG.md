@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 3.1.2 — 2026-11-08
+
+- 子智能体失败时把真实异常写进状态行（如 already exists / 429 / 模型不存在），
+  不再只显示「未产出」，以便定位 10ms 内失败的原因。
+
 ## 3.1.1 — 2026-11-08
 
 - 恢复模型多样性（PM/Sprint=deepseek-flash，反馈=qwen3.6-flash，趋势/行为=qwen3.8-flash，DX=v4-pro）；

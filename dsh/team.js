@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.1.1'
+const PLUGIN_VERSION = '3.1.2'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -840,10 +840,11 @@ export async function runDepartmentMember(ctx, parent, member, task, signal, hoo
       }
       return { name: sub.name, text: text(result.output), ok: result.stopReason === 'completed', stopReason: result.stopReason, detail: result.detail, attempts: result.attempts ?? [] }
     } catch (error) {
+      const reason = String(error && error.message ? error.message : error).slice(0, 300)
       if (hooks !== undefined && typeof hooks.onSubEnd === 'function') {
-        await hooks.onSubEnd(assignmentId, { ok: false, ms: Date.now() - startedSub, stopReason: 'error' }).catch(() => undefined)
+        await hooks.onSubEnd(assignmentId, { ok: false, ms: Date.now() - startedSub, stopReason: 'error', detail: reason, empty: true }).catch(() => undefined)
       }
-      return { name: sub.name, text: '', ok: false, error: String(error) }
+      return { name: sub.name, text: '', ok: false, error: reason }
     }
   }))
     outcomes.push(...chunk)
