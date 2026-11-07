@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.21.1 — 2026-11-07
+
+- 语音失败提示去重：不再出现「…或点「语音」改地址。可点「语音」检查地址，或…」这种重复句；
+- 本地 STT 收到「服务未启动」时只说一句，并提示用「语音 → 测试」确认；
+- 配套：本地 stt 服务改为 macOS LaunchAgent（com.wenkang.stt，RunAtLoad + KeepAlive），
+  退出/崩溃会自动拉起，不再需要手工 nohup；README 补了安装命令。
+
 ## 2.21.0 — 2026-11-07
 
 - 点麦克风先查权限（permissions.query('microphone')）：
