@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.73.2'
+const PLUGIN_VERSION = '2.73.3'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -656,6 +656,15 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
     '只输出 JSON，不要解释：{"picks":[{"name":"子智能体名字","task":"它要做什么"}]}'
   ].join('\n')
 
+  // 短问题（打招呼、单句确认）由主管直接回答：走完整「选人→并行→汇总」要 3 次模型往返，
+  // 对这类输入纯属浪费，通常会把 5 秒拖成 30 秒。
+  const plainTask = task.trim()
+  if (plainTask.length > 0 && plainTask.length <= 40 && !plainTask.includes('\n')) {
+    const direct = await dispatchToMember(ctx, parent, member, task, signal)
+    const answer = text(direct.output)
+    return { text: answer, output: answer, stopReason: direct.stopReason, detail: direct.detail, provider: direct.provider, model: direct.model, picks: [] }
+  }
+
   let picks = []
   // 子智能体不超过 4 个时直接按关键词选人，省掉一次主管排期调用（通常 4–30 秒）。
   if (subs.length > 4) {
@@ -693,6 +702,11 @@ export async function runDepartmentMember(ctx, parent, member, task, signal) {
     const reasons = outcomes.slice(0, 3).map((entry) => entry.name + '：' + text(entry.error ?? '无输出').slice(0, 80)).join('；')
     const message = '部门里没有子智能体跑通（' + String(outcomes.length) + ' 个全部失败）。' + (reasons.length > 0 ? ' 原因：' + reasons : ' 请检查它们的模型配置。')
     return { text: message, output: message, stopReason: 'completed', detail: '', provider: '', model: '' }
+  }
+  // 只选中 1 个子智能体时，它的结论本身就是答案，再让主管汇总只是多一次往返。
+  if (usable.length === 1) {
+    const only = usable[0]
+    return { text: only.text, output: only.text, stopReason: 'completed', detail: '', provider: '', model: '', picks }
   }
   const digest = usable.map((entry) => '【' + entry.name + '】\n' + entry.text).join('\n\n')
   const synthPrompt = [
