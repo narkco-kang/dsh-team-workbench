@@ -64,7 +64,9 @@ loaded.apply(ctx)
 check('apply 注册了两个 ctx.effect（样式 + 挂载）', effects.length === 2, String(effects.length))
 for (const e of effects) if (typeof e.fn === 'function') e.fn()
 check('不再依赖工作台注册 API', !src.includes('desktopWorkbenches') && !src.includes('businessWidth'))
-check('客户端平台为 web', pkg.dsh?.client?.platform === 'web' && pkg.dsh.client.inject === undefined, JSON.stringify(pkg.dsh?.client))
+// 平台必须是 web；inject 现在按上游市场协议声明（dsh-desktop-workbenches），不再是空。
+check('客户端平台为 web', pkg.dsh?.client?.platform === 'web', JSON.stringify(pkg.dsh?.client))
+check('客户端按市场协议注入 dsh-desktop-workbenches', Array.isArray(pkg.dsh?.client?.inject) && pkg.dsh.client.inject.includes('dsh-desktop-workbenches'), JSON.stringify(pkg.dsh?.client?.inject))
 check('挂了全窗口 App', src.includes('dsh-team-app-host') && src.includes('dta-shell'))
 check('导出面板供 SSR（__panel）', typeof loaded.__panel === 'function')
 
