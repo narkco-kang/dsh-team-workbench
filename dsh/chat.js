@@ -39,7 +39,7 @@ import {
   searchMemoryHybrid,
   slotOf
 } from './memory.js'
-import { loadSttSettings, probeStt, providerPresets, saveSttSettings, transcribe } from './stt.js'
+import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -786,6 +786,7 @@ export function apply(ctx) {
             return json({ ok: true, settings: { ...saved, apiKey: '', apiKeyConfigured: saved.apiKey.length > 0 } })
           }
           if (text(body.action) === 'probe') return json({ ok: true, probe: await probeStt(await loadSttSettings()) })
+          if (text(body.action) === 'selftest') return json({ ok: true, result: await selftest(await loadSttSettings()) })
           return json({ ok: false, error: '未知的 action' }, 400)
         }
         const bytes = Buffer.from(await request.arrayBuffer())

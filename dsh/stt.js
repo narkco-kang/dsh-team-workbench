@@ -198,3 +198,39 @@ export async function transcribe(bytes, options = {}) {
   if (parsed !== null && typeof parsed === 'object' && typeof parsed.text === 'string') return cleanTranscript(parsed.text)
   return cleanTranscript(raw)
 }
+
+/** 生成 0.8 秒 16k 单声道 WAV（低音量正弦），用于「测通断 + 测延迟」，不依赖麦克风。 */
+export function makeTestWav(seconds = 0.8) {
+  const rate = 16000
+  const total = Math.max(1, Math.floor(rate * seconds))
+  const buffer = Buffer.alloc(44 + total * 2)
+  buffer.write('RIFF', 0)
+  buffer.writeUInt32LE(36 + total * 2, 4)
+  buffer.write('WAVE', 8)
+  buffer.write('fmt ', 12)
+  buffer.writeUInt32LE(16, 16)
+  buffer.writeUInt16LE(1, 20)
+  buffer.writeUInt16LE(1, 22)
+  buffer.writeUInt32LE(rate, 24)
+  buffer.writeUInt32LE(rate * 2, 28)
+  buffer.writeUInt16LE(2, 32)
+  buffer.writeUInt16LE(16, 34)
+  buffer.write('data', 36)
+  buffer.writeUInt32LE(total * 2, 40)
+  for (let index = 0; index < total; index += 1) {
+    const value = Math.round(Math.sin((2 * Math.PI * 440 * index) / rate) * 0.08 * 32767)
+    buffer.writeInt16LE(value, 44 + index * 2)
+  }
+  return buffer
+}
+
+/** 一键自检：拿一段合成音频走当前服务商，回报连通性、耗时与返回文本长度。 */
+export async function selftest(settings) {
+  const started = Date.now()
+  try {
+    const value = await transcribe(makeTestWav(0.8), { settings, filename: 'selftest.wav', contentType: 'audio/wav' })
+    return { ok: true, ms: Date.now() - started, text: text(value).slice(0, 80) }
+  } catch (error) {
+    return { ok: false, ms: Date.now() - started, error: String(error && error.message ? error.message : error) }
+  }
+}
