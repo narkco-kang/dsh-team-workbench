@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.65.2'
+const PLUGIN_VERSION = '2.66.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -254,6 +254,14 @@ function emptyStore() {
   return { version: STORE_VERSION, updatedAt: '', preset: '', chiefId: '', groups: [], members: [] }
 }
 
+/** 总管解析：有效则沿用，否则回退到第一位启用成员（没有成员时为空串）。 */
+function resolveChiefId(members, current) {
+  const fromStore = text(current)
+  if (members.some((member) => member.id === fromStore)) return fromStore
+  const first = members.find((member) => member.enabled !== false) || members[0]
+  return first === undefined ? '' : first.id
+}
+
 /** 读取团队配置；缺失或损坏时返回空团队。 */
 export async function loadStore() {
   try {
@@ -269,8 +277,9 @@ export async function loadStore() {
       version: STORE_VERSION,
       updatedAt: text(parsed?.updatedAt),
       preset: text(parsed?.preset),
-      // 总管：团队里唯一的协调者；被删或失配时自动清空，不会留下悬空 id。
-      chiefId: members.some((member) => member.id === chiefId) ? chiefId : '',
+      // 总管：团队里唯一的协调者，总管台的管理员。没有有效总管时默认第一位启用成员，
+      // 这样总管台永远有 👑，也不会出现「群聊里没有有效成员」。
+      chiefId: resolveChiefId(members, chiefId),
       groups,
       members
     }
@@ -854,6 +863,14 @@ function registerTools(ctx) {
     },
     async execute() {
       const store = await loadStore()
+      // 默认总管落到磁盘，保证「总管台默认有一个主管」是持久状态而不是每次临时推断。
+      if (store.members.length > 0 && store.chiefId.length > 0) {
+        const raw = await readFile(storePath(), 'utf8').then((text) => JSON.parse(text)).catch(() => null)
+        if (raw !== null && text(raw.chiefId) !== store.chiefId) {
+          store.updatedAt = new Date().toISOString()
+          await saveStore(store)
+        }
+      }
       return { count: store.members.length, pluginVersion: PLUGIN_VERSION, chiefId: store.chiefId || '', groups: store.groups, members: store.members }
     }
   }
@@ -1514,6 +1531,9 @@ async function applyMemberAction(store, body, ctx) {
 
   if (action === 'delete') {
     const id = text(body.id)
+    if (id.length > 0 && id === resolveChiefId(store.members, store.chiefId)) {
+      return '总管台的管理员（总管）不能删除；请先把别的成员设为总管（★），再删除它。'
+    }
     const before = store.members.length
     store.members = store.members.filter((m) => m.id !== id)
     if (store.chiefId === id) store.chiefId = ''
@@ -1652,6 +1672,10 @@ async function applyMemberAction(store, body, ctx) {
   if (action === 'delete-many') {
     const ids = Array.isArray(body.ids) ? body.ids.map(text).filter((id) => id.length > 0) : []
     if (ids.length === 0) return '缺少要删除的 ids'
+    const chiefId = resolveChiefId(store.members, store.chiefId)
+    if (chiefId.length > 0 && ids.includes(chiefId)) {
+      return '选中的成员里有总管台的管理员（总管），不能删除；请先取消勾选它。'
+    }
     const drop = new Set(ids)
     const before = store.members.length
     store.members = store.members.filter((m) => !drop.has(m.id))
