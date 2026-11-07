@@ -280,11 +280,18 @@ export async function sendPrivate(ctx, parent, member, userText, signal) {
   if (chats.private[key] === undefined) chats.private[key] = { messages: [], updatedAt: 0 }
   const thread = chats.private[key]
   pushMessage(thread.messages, messageOf('user', null, userText))
+  thread.progress = { startedAt: new Date().toISOString(), current: member.name, steps: [{ name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0 }], finishedAt: '' }
+  await saveChats(chats)
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
   const memoryText = await memoryBlock(slot, memory.persona, userText)
   const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal)
   const reply = { ...raw, text: stripReceipts(raw.text) }
+  const step = thread.progress.steps[0]
+  step.phase = 'done'
+  step.ms = Date.now() - Date.parse(step.startedAt)
+  thread.progress.current = ''
+  thread.progress.finishedAt = new Date().toISOString()
   if (reply.text.trim().length > 0) pushMessage(thread.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
   thread.updatedAt = new Date().toISOString()
   await saveChats(chats)
@@ -339,6 +346,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
   if (alive.length === 0) throw new Error('群聊里没有有效成员')
   const memory = await loadMemory()
   pushMessage(target.messages, messageOf('user', null, userText))
+  // 过程化状态：前端轮询 progress，看到「现在轮到谁」和已经跑完的每一棒。
+  target.progress = { startedAt: new Date().toISOString(), current: '', steps: [], finishedAt: '' }
   await saveChats(chats)
 
   const responder = responderOf(target)
@@ -377,8 +386,15 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
       const prompt = depth === 0 && admin !== undefined && member.id === admin.id
         ? adminPrompt(target, alive, target.messages.slice(0, -1), userText, memoryText)
         : memberPrompt(target, member, alive, target.messages.slice(0, -1), userText, lastSpeaker, memoryText)
+      target.progress.current = member.name
+      target.progress.steps.push({ name: member.name, startedAt: new Date().toISOString(), phase: 'thinking', ms: 0 })
+      await saveChats(chats)
       const raw = await runMember(ctx, parent, member, prompt, signal)
       const reply = { ...raw, text: stripReceipts(raw.text) }
+      const step = target.progress.steps[target.progress.steps.length - 1]
+      step.phase = 'done'
+      step.ms = Date.now() - Date.parse(step.startedAt)
+      target.progress.current = ''
       turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
       if (reply.text.trim().length > 0) pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
       target.updatedAt = new Date().toISOString()
@@ -392,6 +408,9 @@ export async function sendGroup(ctx, parent, room, members, userText, signal) {
     queue = next
     depth += 1
   }
+  target.progress.current = ''
+  target.progress.finishedAt = new Date().toISOString()
+  await saveChats(chats)
   void compactIfNeeded(ctx, parent, 'room', target.id, target.messages, admin, target.name, signal)
     .catch((error) => console.warn('[team-workbench] 群聊记忆压缩失败：' + String(error)))
   return { messages: target.messages, turns, responder, pickedId }
@@ -599,12 +618,15 @@ export function apply(ctx) {
     fetch: async (request) => {
       if (request.method === 'POST') return handleSend('private', request)
       try {
-        const id = new URL(request.url).searchParams.get('memberId') || ''
+        const url = new URL(request.url)
+        const id = url.searchParams.get('memberId') || ''
         const store = await loadStore()
         const member = store.members.find((entry) => entry.id === id)
         if (member === undefined) return json({ ok: false, error: '找不到该成员' }, 404)
         const chats = await loadChats()
         const thread = chats.private[id]
+        // 轻量轮询：只回过程化状态，不带整段消息。
+        if (url.searchParams.get('progress') === '1') return json({ ok: true, progress: (thread && thread.progress) || null })
         return json({ ok: true, member, messages: thread && Array.isArray(thread.messages) ? thread.messages : [] })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
@@ -619,10 +641,12 @@ export function apply(ctx) {
     fetch: async (request) => {
       if (request.method === 'POST') return handleSend('group', request)
       try {
-        const id = new URL(request.url).searchParams.get('id') || ''
+        const url = new URL(request.url)
+        const id = url.searchParams.get('id') || ''
         const chats = await loadChats()
         const room = chats.rooms.find((entry) => entry.id === id)
         if (room === undefined) return json({ ok: false, error: '找不到该群聊' }, 404)
+        if (url.searchParams.get('progress') === '1') return json({ ok: true, progress: room.progress || null })
         return json({ ok: true, room, messages: Array.isArray(room.messages) ? room.messages : [] })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)

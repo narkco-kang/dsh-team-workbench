@@ -90,10 +90,23 @@ window.fetch = function (url, init) {
   else if (u.indexOf('/api/team-workbench/roles') === 0) data = window.__DSH_PREVIEW__.roles;
   else if (u.indexOf('/api/team-workbench/skills') === 0) data = { ok: true, skills: [], deployed: [] };
   else if (u.indexOf('/api/team-workbench/chats/private') === 0) data = { ok: true, member: null, messages: window.__DSH_PREVIEW__.messages.private };
+  if (u.indexOf('progress=1') >= 0) {
+    // 仅供截图：按发送后经过的时间伪造「正在接力」的过程。
+    var started = window.__DSH_PREVIEW__.sendStart || 0;
+    var elapsed = started > 0 ? Date.now() - started : 0;
+    var trail = [{ name: '总管', phase: 'done', ms: 1200 }];
+    var current = '分析师';
+    if (elapsed > 2600) { trail.push({ name: '分析师', phase: 'done', ms: 1400 }); current = '工程师'; }
+    if (elapsed > 4200) { trail.push({ name: '工程师', phase: 'done', ms: 1600 }); current = '审核员'; }
+    trail.push({ name: current, phase: 'thinking', ms: 0 });
+    data = { ok: true, progress: { startedAt: new Date(started).toISOString(), current: current, steps: trail, finishedAt: '' } };
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } });
+  }
   if (init && String(init.method || '').toUpperCase() === 'POST' && (u.indexOf('/api/team-workbench/chats/private') === 0 || u.indexOf('/api/team-workbench/chats/group') === 0)) {
     // 仅用于截图：延迟 6 秒返回，方便看「正在思考」状态条。
     var isPrivate = u.indexOf('/private') >= 0;
     var bucket = isPrivate ? window.__DSH_PREVIEW__.messages.private : window.__DSH_PREVIEW__.messages.group;
+    window.__DSH_PREVIEW__.sendStart = Date.now();
     var incoming = JSON.parse(init.body || '{}');
     var stamp = new Date().toISOString();
     var agentMsg = (window.__DSH_PREVIEW__.messages.group || []).filter(function (m) { return m.role === 'agent'; })[0] || { memberId: 'x', name: '成员', emoji: '🤖' };

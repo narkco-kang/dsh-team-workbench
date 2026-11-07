@@ -1511,6 +1511,16 @@ window.__ModuleLoader__.load({
         return function () { clearInterval(timer); };
       }, [busy]);
       var thinkingSeconds = busy && thinkingStart > 0 ? Math.max(0, Math.round((Date.now() - thinkingStart) / 1000)) : 0;
+      // 过程化状态：轮询服务端的 progress，能看到「现在轮到谁」和已经跑完的每一棒。
+      var thinkingProgressState = useState(null);
+      var thinkingProgress = thinkingProgressState[0];
+      var setThinkingProgress = thinkingProgressState[1];
+      var thinkingDone = thinkingProgress && Array.isArray(thinkingProgress.steps)
+        ? thinkingProgress.steps.filter(function (s) { return s.phase === "done"; }).map(function (s) { return s.name; })
+        : [];
+      var thinkingWho = thinkingProgress && thinkingProgress.current
+        ? thinkingProgress.current
+        : (thinkingProgress && thinkingDone.length > 0 ? thinkingDone[thinkingDone.length - 1] : "");
       // 只有「当前这段会话」自己的请求在跑时才显示思考条；切到别的会话不会串台。
       var thinkingHere = busy && busyTarget !== null && target !== null && busyTarget.kind === target.kind && busyTarget.id === target.id;
       var bannerState = useState("");
@@ -1705,6 +1715,16 @@ window.__ModuleLoader__.load({
         var payload = target.kind === "private"
           ? { sessionId: sessionId, memberId: target.id, text: body }
           : { sessionId: sessionId, id: target.id, text: body };
+        var progressUrl = target.kind === "private"
+          ? "/api/team-workbench/chats/private?memberId=" + encodeURIComponent(target.id) + "&progress=1"
+          : "/api/team-workbench/chats/group?id=" + encodeURIComponent(target.id) + "&progress=1";
+        setThinkingProgress(null);
+        var poll = setInterval(function () {
+          fetch(progressUrl, { cache: "no-store" })
+            .then(function (res) { return res.json(); })
+            .then(function (json) { if (json && json.ok) setThinkingProgress(json.progress || null); })
+            .catch(function () { /* 状态轮询失败不影响发送 */ });
+        }, 700);
         fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(240000) })
           .then(function (res) { return res.json().then(function (json) { if (!res.ok || json.ok === false) throw new Error(json.error || ("发送失败 HTTP " + res.status)); return json; }); })
           .then(function (json) {
@@ -1713,7 +1733,7 @@ window.__ModuleLoader__.load({
             loadOverview();
           })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); })
-          .then(function () { setBusy(false); setBusyTarget(null); });
+          .then(function () { clearInterval(poll); setThinkingProgress(null); setBusy(false); setBusyTarget(null); });
       };
 
       var openForm = function () {
@@ -1898,21 +1918,19 @@ window.__ModuleLoader__.load({
           h("div", { className: "ats-compose" },
             h("div", { className: "ats-thinking" + (thinkingHere ? " on" : "") },
               thinkingHere
-                ? (currentRoom
-                    ? [
-                        h("span", { key: "dot", className: "ats-thinking-dot" }),
-                        h("span", { key: "who" }, (currentRoom.adminName ? "「" + currentRoom.adminName + "」" : "管理员") + "正在思考…"),
-                        currentRoom.memberIds && currentRoom.memberIds.length > 2
+                ? [
+                    h("span", { key: "dot", className: "ats-thinking-dot" }),
+                    h("span", { key: "who" },
+                      "「" + (thinkingWho || (currentRoom ? (currentRoom.adminName || "管理员") : title)) + "」正在思考…"),
+                    thinkingDone.length > 0
+                      ? h("span", { key: "trail", className: "ats-thinking-hint" },
+                          " · " + thinkingDone.slice(-3).join(" → ") + (thinkingDone.length > 3 ? " → …" : "") + " 已完成")
+                      : (currentRoom && currentRoom.memberIds && currentRoom.memberIds.length > 2
                           ? h("span", { key: "hint", className: "ats-thinking-hint" },
                               " · " + (currentRoom.memberIds.length > 7 ? "随后按需 @ 成员接力" : "随后最多 @ " + (currentRoom.memberIds.length - 1) + " 位成员接力"))
-                          : null,
-                        h("span", { key: "sec", className: "ats-thinking-sec" }, thinkingSeconds >= 3 ? " · " + thinkingSeconds + "s" : "")
-                      ]
-                    : [
-                        h("span", { key: "dot", className: "ats-thinking-dot" }),
-                        h("span", { key: "who" }, "「" + title + "」正在思考…"),
-                        h("span", { key: "sec", className: "ats-thinking-sec" }, thinkingSeconds >= 3 ? " · " + thinkingSeconds + "s" : "")
-                      ])
+                          : null),
+                    h("span", { key: "sec", className: "ats-thinking-sec" }, thinkingSeconds >= 3 ? " · " + thinkingSeconds + "s" : "")
+                  ]
                 : null
             ),
             h("div", { className: "ats-composer" },
