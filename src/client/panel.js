@@ -1349,6 +1349,80 @@ window.__ModuleLoader__.load({
         };
         run(0).catch(function (error) { setProbeAll({ busy: false, report: "检测失败：" + String(error && error.message ? error.message : error) }); });
       };
+      // 自动分配：从宿主模型目录里挑“真实可用”的模型，轮流分给部门子智能体（以及没配路由的成员）。
+      var autoAssignModels = function () {
+        if (probeAll.busy) return;
+        setProbeAll({ busy: true, report: "挑选可用模型…（先校验目录，再真实推理）" });
+        var candidates = [];
+        (snap.catalog || []).forEach(function (row) {
+          (row.models || []).forEach(function (m) {
+            if (candidates.length >= 40) return;
+            candidates.push({ provider: row.id, model: m.id });
+          });
+        });
+        if (candidates.length === 0) { setProbeAll({ busy: false, report: "宿主模型目录为空，无法自动分配。" }); return; }
+        var valid = [];
+        var metaIndex = 0;
+        var liveIndex = 0;
+        var metaOk = [];
+        var metaStep = function () {
+          if (metaIndex >= candidates.length) { return liveStep(); }
+          var candidate = candidates[metaIndex];
+          return fetch("/api/team-workbench/probe", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ provider: candidate.provider, model: candidate.model })
+          }).then(function (res) { return res.json(); }).then(function (payload) {
+            if (payload.ok === true) {
+              var names = (payload.inputModalities || []).map(String);
+              if (names.length === 0 || names.indexOf("text") >= 0) metaOk.push(candidate);
+            }
+            metaIndex += 1;
+            return metaStep();
+          }).catch(function () { metaIndex += 1; return metaStep(); });
+        };
+        var liveStep = function () {
+          if (liveIndex >= metaOk.length || valid.length >= 6) return assign();
+          var candidate = metaOk[liveIndex];
+          return fetch("/api/team-workbench/probe", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "live", sessionId: sessionId, provider: candidate.provider, model: candidate.model })
+          }).then(function (res) { return res.json(); }).then(function (payload) {
+            if (payload.ok === true) valid.push(candidate);
+            liveIndex += 1;
+            return liveStep();
+          }).catch(function () { liveIndex += 1; return liveStep(); });
+        };
+        var assign = function () {
+          if (valid.length === 0) { setProbeAll({ busy: false, report: "没有通过真实推理的模型，未做分配。" }); return; }
+          var tasks = [];
+          (snap.members || []).forEach(function (m) {
+            if (m.department !== null && m.department !== undefined && m.department.subAgents.length > 0) {
+              var subs = m.department.subAgents.map(function (sub, index) {
+                var pick = valid[index % valid.length];
+                return Object.assign({}, sub, { provider: pick.provider, model: pick.model });
+              });
+              var lead = valid[0];
+              tasks.push(fetch("/api/team-workbench/members", {
+                method: "POST", headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "upsert", member: { id: m.id, department: { name: m.department.name, subAgents: subs }, routes: [{ id: "lead-" + m.id.slice(-6), label: "部门主管", provider: lead.provider, model: lead.model, reasoningEffort: "", enabled: true }] } })
+              }));
+              return;
+            }
+            if ((m.routes || []).length === 0) {
+              var first = valid[0];
+              tasks.push(fetch("/api/team-workbench/members", {
+                method: "POST", headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "upsert", member: { id: m.id, routes: [{ id: "auto-" + m.id.slice(-6), label: "自动分配", provider: first.provider, model: first.model, reasoningEffort: "", enabled: true }] } })
+              }));
+            }
+          });
+          return Promise.all(tasks).then(function () {
+            setProbeAll({ busy: false, report: "已分配 " + String(valid.length) + " 个可用模型（真实推理通过）：" + valid.map(function (v) { return v.provider + "/" + v.model; }).join("、") });
+            load();
+          });
+        };
+        metaStep();
+      };
       var mergeState = useState({ open: false, busy: "", error: "" });
       var merge = mergeState[0];
       var setMergeState = mergeState[1];
@@ -1643,9 +1717,14 @@ window.__ModuleLoader__.load({
           h("span", { className: "ats-spacer" }),
           h("button", {
             className: "ats-btn", type: "button", disabled: probeAll.busy,
-            "data-tip": "检测全部模型路由，删除失效的", "aria-label": "检测全部模型",
+            "data-tip": "检测全部模型路由（真实推理），删除失效的", "aria-label": "检测全部模型",
             onClick: checkAllModels
           }, probeAll.busy ? "⏳" : "🩺"),
+          h("button", {
+            className: "ats-btn", type: "button", disabled: probeAll.busy,
+            "data-tip": "自动分配：挑真实可用的模型，轮流分给子智能体", "aria-label": "自动分配模型",
+            onClick: autoAssignModels
+          }, "🎲"),
           h("button", {
             className: "ats-btn", type: "button", disabled: busy === "save",
             "data-tip": "把同部门成员合并成一个部门智能体", "aria-label": "合并部门",
