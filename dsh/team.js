@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.95.0'
+const PLUGIN_VERSION = '2.96.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -561,8 +561,19 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // 走外部子级（无 childId）才会把结果返回给调用方。
   // 宿主偶尔不返回 activation（spawn 卡住）：给它 15 秒，超时就走失败回退，
   // 不能让团队面板无限等。
+  // superagent 优化版：固定 childId 复用会话，显式 delivery=caller 让结果回到调用方。
+  // 宿主报 already exists 时退回一次性 childId。
+  const reuseChild = process.env.TW_NO_CHILD_REUSE !== '1'
+  const reuseId = reuseChild ? 'team-' + member.id : ''
   const run = await Promise.race([
-    startChild(subagents, providerName, { ...request, signal }),
+    (async () => {
+      try {
+        return await startChild(subagents, providerName, { ...request, signal, ...(reuseId.length > 0 ? { childId: reuseId } : {}) })
+      } catch (error) {
+        if (!/already exists/i.test(String(error))) throw error
+        return startChild(subagents, providerName, { ...request, signal, childId: reuseId + '-r' + Date.now().toString(36) })
+      }
+    })(),
     new Promise((_resolve, reject) => setTimeout(() => reject(new Error('subagent activation timeout')), 15000))
   ])
   // 拿到子 agent 句柄后登记，供 steerActive 中途插话。

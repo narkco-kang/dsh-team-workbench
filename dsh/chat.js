@@ -440,9 +440,15 @@ const MEMBER_HARD_TIMEOUT_MS = 90000
 
 async function runMember(ctx, parent, member, prompt, signal, options) {
   // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
-  // DS-Bot 群组架构：部门不再自己拉子智能体，主管就是一个普通成员。
-  // 子智能体只有在群里被 @ 到才发言（见 sendGroup 的接力逻辑）。
-  const work = dispatchToMember(ctx, parent, member, prompt, signal)
+  // superagent 扇出：主管把任务发给全部子智能体并行执行，再由主管汇总。
+  const ticketId = options !== undefined ? text(options.ticketId) : ''
+  const hooks = ticketId.length > 0 ? {
+    onSubStart: async (sub) => addAssignment(ticketId, sub.id, sub.name),
+    onSubEnd: async (assignmentId, patch) => finishAssignment(assignmentId, patch)
+  } : undefined
+  const work = member.department !== null && member.department !== undefined && member.department.subAgents.length > 0
+    ? runDepartmentMember(ctx, parent, member, prompt, signal, hooks)
+    : dispatchToMember(ctx, parent, member, prompt, signal)
   // 硬超时：宿主偶尔不返回，群聊不能被无限挂住。
   const result = await Promise.race([
     work,
