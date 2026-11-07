@@ -1316,6 +1316,42 @@ window.__ModuleLoader__.load({
       var bannerState = useState("");
       var banner = bannerState[0];
       var setBanner = bannerState[1];
+      var micState = useState(false);
+      var micOn = micState[0];
+      var setMicOn = micState[1];
+      var recRef = React.useRef(null);
+
+      var toggleVoice = function () {
+        if (micOn) {
+          try { if (recRef.current !== null) recRef.current.stop(); } catch (error) { /* 已停止 */ }
+          return;
+        }
+        var SR = typeof window === "undefined" ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
+        if (SR === null || SR === undefined) {
+          setBanner("当前环境不支持语音识别（Web Speech API 不可用）");
+          return;
+        }
+        var rec = new SR();
+        rec.lang = "zh-CN";
+        rec.interimResults = true;
+        rec.continuous = false;
+        rec.onresult = function (event) {
+          var spoken = "";
+          for (var i = event.resultIndex; i < event.results.length; i += 1) spoken += event.results[i][0].transcript;
+          if (spoken.length === 0) return;
+          setDraft(function (prev) { return prev + spoken; });
+        };
+        rec.onerror = function (event) { setMicOn(false); setBanner("语音识别失败：" + String(event.error || "")); };
+        rec.onend = function () { setMicOn(false); };
+        try {
+          rec.start();
+          recRef.current = rec;
+          setMicOn(true);
+          setBanner("");
+        } catch (error) {
+          setBanner("无法启动语音识别：" + String(error && error.message ? error.message : error));
+        }
+      };
       var formState = useState(null);
       var form = formState[0];
       var setForm = formState[1];
@@ -1486,6 +1522,7 @@ window.__ModuleLoader__.load({
               onChange: function (e) { setDraft(e.target.value); },
               onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
             }),
+            h("button", { className: "ats-btn" + (micOn ? " recording" : ""), type: "button", title: micOn ? "停止语音输入" : "语音输入（中文）", onClick: toggleVoice }, micOn ? "● 聆听中" : "🎤"),
             h("button", { className: "ats-btn primary", type: "button", disabled: busy || draft.trim().length === 0, onClick: send }, busy ? "等待回复…" : "发送")
           )
         ),
