@@ -627,13 +627,18 @@ export async function chatOverview(ctx) {
   if (ensureChiefRoom(chats, store)) await saveChats(chats)
   const byId = new Map(store.members.map((m) => [m.id, m]))
   let roleCats = new Map()
+  let roleCatsByName = new Map()
   try {
     const index = await loadRoleIndex()
     roleCats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+    const norm = (value) => String(value || '').replace(/\s*\d+$/u, '').trim()
+    roleCatsByName = new Map(index.roles.map((role) => [norm(role.name), role.categoryName]))
   } catch { /* 角色库缺失时部门名留空 */ }
   const departmentOf = (member) => member.department !== null && member.department !== undefined
     ? member.department.name
-    : (member.roleRef.id.length > 0 ? (roleCats.get(member.roleRef.id) || '') : '')
+    : (member.roleRef.id.length > 0
+      ? (roleCats.get(member.roleRef.id) || '')
+      : (roleCatsByName.get(String(member.name || '').replace(/\s*\d+$/u, '').trim()) || ''))
   const lastOf = (messages) => (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1] : null)
   return {
     ok: true,
@@ -809,9 +814,13 @@ export function apply(ctx) {
         const store = await loadStore()
         const index = await loadRoleIndex()
         const cats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+        const norm = (value) => String(value || '').replace(/\s*\d+$/u, '').trim()
+        const catsByName = new Map(index.roles.map((role) => [norm(role.name), role.categoryName]))
         const deptOf = (member) => member.department !== null && member.department !== undefined
           ? member.department.name
-          : (member.roleRef.id.length > 0 ? (cats.get(member.roleRef.id) || '') : '')
+          : (member.roleRef.id.length > 0
+            ? (cats.get(member.roleRef.id) || '')
+            : (catsByName.get(norm(member.name)) || ''))
         const targets = store.members.filter((member) => deptOf(member) === name)
         if (targets.length < 2) return json({ ok: false, error: '「' + name + '」不足 2 名成员，无需合并' }, 400)
 

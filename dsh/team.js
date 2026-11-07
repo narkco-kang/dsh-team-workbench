@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.52.0'
+const PLUGIN_VERSION = '2.53.0'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -1675,15 +1675,20 @@ export function apply(ctx, config) {
     const catalog = await collectCatalog(ctx)
     // 成员所属部门：部门成员用 department.name；从角色库导入的按角色分类补一个展示名。
     let roleCats = new Map()
+    let roleCatsByName = new Map()
     try {
       const index = await loadRoleIndex()
       roleCats = new Map(index.roles.map((role) => [role.id, role.categoryName]))
+      // 早期导入的成员没有 roleRef，只能按名字回查角色库（去掉重名后缀的数字）。
+      const norm = (value) => String(value || '').replace(/\s*\d+$/u, '').trim()
+      roleCatsByName = new Map(index.roles.map((role) => [norm(role.name), role.categoryName]))
     } catch { /* 角色库缺失不影响快照 */ }
+    const nameCategory = (name) => roleCatsByName.get(String(name || '').replace(/\s*\d+$/u, '').trim()) || ''
     const withDepartment = (members) => members.map((member) => ({
       ...member,
       departmentName: member.department !== null && member.department !== undefined
         ? member.department.name
-        : (member.roleRef.id.length > 0 ? (roleCats.get(member.roleRef.id) || '') : ''),
+        : (member.roleRef.id.length > 0 ? (roleCats.get(member.roleRef.id) || '') : nameCategory(member.name)),
       subAgentCount: member.department !== null && member.department !== undefined ? member.department.subAgents.length : 0
     }))
     return {
