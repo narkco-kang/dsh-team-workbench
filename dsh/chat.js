@@ -442,28 +442,27 @@ async function runMember(ctx, parent, member, prompt, signal, options) {
   // 部门成员：先由部门主管挑子智能体、并行执行，再汇总。
   // superagent 扇出：主管把任务发给全部子智能体并行执行，再由主管汇总。
   const ticketId = options !== undefined ? text(options.ticketId) : ''
-  // 子智能体也要出现在状态条里：各自一行，显示进行中/完成/耗时。
+  // 子智能体也出现在状态条里：由调用方（私聊/群聊）把 step 记到自己的 progress 上。
   const subSteps = new Map()
   const hooks = {
     onSubStart: async (sub) => {
       const step = { name: sub.name, emoji: sub.emoji || '🧩', startedAt: new Date().toISOString(), phase: 'thinking', ms: 0, summary: '部门子智能体 · 正在执行' }
       subSteps.set(sub.name, step)
-      target.progress.steps = (Array.isArray(target.progress.steps) ? target.progress.steps : []).concat(step)
-      target.progress.parallel = (Array.isArray(target.progress.parallel) ? target.progress.parallel : []).concat(sub.name)
-      await persist()
+      if (options !== undefined && typeof options.onSubStep === 'function') await options.onSubStep(step).catch(() => undefined)
       return ticketId.length > 0 ? addAssignment(ticketId, sub.id, sub.name) : ''
     },
     onSubEnd: async (assignmentId, patch) => {
+      let endedName = ''
       for (const [name, step] of subSteps) {
         if (step.phase !== 'thinking') continue
         step.phase = patch && patch.ok === false ? 'failed' : 'done'
         step.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0
         step.summary = step.phase === 'done' ? '子智能体已完成' : '子智能体未产出'
-        target.progress.parallel = (target.progress.parallel || []).filter((entry) => entry !== name)
+        endedName = name
         subSteps.delete(name)
         break
       }
-      await persist()
+      if (options !== undefined && typeof options.onSubStepEnd === 'function') await options.onSubStepEnd(endedName, patch).catch(() => undefined)
       if (ticketId.length > 0 && assignmentId.length > 0) finishAssignment(assignmentId, patch)
     }
   }
@@ -497,7 +496,21 @@ export async function sendPrivate(ctx, parent, member, userText, signal, options
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
   const memoryText = await memoryBlock(slot, memory.persona, userText)
-  const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal, options)
+  const liveOptions = {
+    ...(options !== undefined ? options : {}),
+    onSubStep: async (subStep) => {
+      thread.progress.steps.push(subStep)
+      thread.progress.parallel = (Array.isArray(thread.progress.parallel) ? thread.progress.parallel : []).concat(subStep.name)
+      await saveChats(chats)
+    },
+    onSubStepEnd: async (name, patch) => {
+      thread.progress.parallel = (thread.progress.parallel || []).filter((entry) => entry !== name)
+      const found = thread.progress.steps.find((entry) => entry.name === name && entry.phase === 'thinking')
+      if (found !== undefined) { found.phase = patch && patch.ok === false ? 'failed' : 'done'; found.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0 }
+      await saveChats(chats)
+    }
+  }
+  const raw = await runMember(ctx, parent, member, privatePrompt(member, thread.messages.slice(0, -1), userText, memoryText), signal, liveOptions)
   const reply = { ...raw, text: stripReceipts(raw.text) }
   const step = thread.progress.steps[0]
   step.phase = 'done'
@@ -647,7 +660,21 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     // 短消息（≤40 字）直接由该成员自己回答，跳过部门「选人→并行→汇总」，
     // 否则一条「OK」也要经历 3 次模型往返。
     // 部门成员一律走「主管 → 全部子智能体并行 → 主管汇总」。
-    const raw = await runMember(ctx, parent, member, prompt, signal, options)
+    const liveOptions = {
+      ...(options !== undefined ? options : {}),
+      onSubStep: async (subStep) => {
+        target.progress.steps.push(subStep)
+        target.progress.parallel = (Array.isArray(target.progress.parallel) ? target.progress.parallel : []).concat(subStep.name)
+        await persist()
+      },
+      onSubStepEnd: async (name, patch) => {
+        target.progress.parallel = (target.progress.parallel || []).filter((entry) => entry !== name)
+        const found = target.progress.steps.find((entry) => entry.name === name && entry.phase === 'thinking')
+        if (found !== undefined) { found.phase = patch && patch.ok === false ? 'failed' : 'done'; found.ms = patch && Number.isFinite(patch.ms) ? patch.ms : 0 }
+        await persist()
+      }
+    }
+    const raw = await runMember(ctx, parent, member, prompt, signal, liveOptions)
     const reply = { ...raw, text: stripReceipts(raw.text) }
     step.phase = 'done'
     step.ms = Date.now() - Date.parse(step.startedAt)
