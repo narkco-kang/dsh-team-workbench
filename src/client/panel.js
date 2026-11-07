@@ -148,7 +148,10 @@ window.__ModuleLoader__.load({
       ".ats-note.err{background:rgba(229,72,77,.14);color:#dc2626;}",
       ".ats-note.ok{background:rgba(46,160,67,.16);}",
       ".ats-out{white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.5;max-height:200px;overflow:auto;padding:6px 7px;border-radius:6px;background:rgba(127,127,127,.10);margin-top:5px;}",
-      ".ats-empty{opacity:.6;font-size:12px;text-align:center;padding:24px 12px;line-height:1.7;}",
+      ".ats-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px 16px;text-align:center;line-height:1.6;color:var(--bt-ink-2);}",
+      ".ats-empty-icon{font-size:34px;line-height:1;opacity:.9;filter:drop-shadow(0 3px 6px rgba(15,23,42,.18));}",
+      ".ats-empty-title{font-size:13px;font-weight:500;color:var(--bt-ink);}",
+      ".ats-empty-hint{font-size:11.5px;opacity:.7;max-width:280px;}",
       ".ats-foot{flex:0 0 auto;padding:6px 10px;font-size:10.5px;opacity:.5;border-top:1px solid var(--dsh-border,rgba(127,127,127,.16));word-break:break-all;}",
       ".ats-routes{margin-top:7px;border-top:1px solid var(--dsh-border,rgba(127,127,127,.16));padding-top:6px;display:flex;flex-direction:column;gap:4px;}",
       ".ats-route{display:flex;align-items:center;gap:6px;padding:3px 5px;border-radius:6px;background:rgba(127,127,127,.08);}",
@@ -771,6 +774,15 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /** 空状态：图标 + 一句话，比一行灰字更清楚。 */
+    function Empty(props) {
+      return h("div", { className: "ats-empty" },
+        h("div", { className: "ats-empty-icon", "aria-hidden": "true" }, props.icon || "🫥"),
+        props.title ? h("div", { className: "ats-empty-title" }, props.title) : null,
+        props.hint ? h("div", { className: "ats-empty-hint" }, props.hint) : null
+      );
+    }
+
     /** 头像：上传了图片就显示图片，否则渲染动态表情。 */
     function Avatar(props) {
       var member = props.member;
@@ -1363,12 +1375,11 @@ window.__ModuleLoader__.load({
 
       var listBody;
       if (snap.loading) {
-        listBody = h("div", { className: "ats-empty" }, "正在读取团队配置…");
+        listBody = h(Empty, { icon: "⏳", title: "正在读取团队配置…" });
       } else if (visible.length === 0) {
-        listBody = h("div", { className: "ats-empty" },
-          members.length === 0
-            ? "还没有成员。点「项目部预设」一键成立 15 人项目部，或从「角色库」挑角色加入。"
-            : "没有匹配「" + query + "」的成员。");
+        listBody = members.length === 0
+          ? h(Empty, { icon: "👥", title: "还没有成员", hint: "点「项目部预设」一键成立 15 人项目部，或从「角色库」挑角色加入。" })
+          : h(Empty, { icon: "🔍", title: "没有匹配「" + query + "」的成员", hint: "换个关键词，或清空搜索。" });
       } else if (view === "flat") {
         listBody = h("div", { className: "ats-grid" }, visible.map(cardOf));
       } else {
@@ -1584,9 +1595,9 @@ window.__ModuleLoader__.load({
           : null,
         h("div", { className: "ats-list" },
           list.loading
-            ? h("div", { className: "ats-empty" }, "正在读取角色库…")
+            ? h(Empty, { icon: "⏳", title: "正在读取角色库…" })
             : list.roles.length === 0
-              ? h("div", { className: "ats-empty" }, "没有匹配的角色。换个关键词试试。")
+              ? h(Empty, { icon: "🧩", title: "没有匹配的角色", hint: "换个关键词试试，或切到别的分类。" })
               : list.roles.map(function (role) {
                   return h("div", { className: "ats-role-row", key: role.id },
                     h("span", { className: "ats-avatar", style: { width: 32, height: 32, fontSize: 17, borderRadius: 9, background: tint(colorOfName(role.color) || "#2563eb", 0.22) } }, role.emoji),
@@ -2282,9 +2293,9 @@ window.__ModuleLoader__.load({
             ref: function (el) { if (el !== null) el.scrollTop = el.scrollHeight; }
           },
             target === null
-              ? h("div", { className: "ats-empty" }, "从左侧选一个成员，或点「＋ 建群」开一个群聊")
+              ? h(Empty, { icon: "💬", title: "选一个成员开始", hint: "或点输入框左侧的 ＋ 新建群聊。" })
               : messages.length === 0
-              ? h("div", { className: "ats-empty" }, currentRoom ? "群已建好，说点什么让成员接话" : "打个招呼开始对话")
+              ? h(Empty, { icon: currentRoom ? "🧑‍🤝‍🧑" : "👋", title: currentRoom ? "群已建好" : "打个招呼开始对话", hint: currentRoom ? "说点什么让成员接话；@成员名 可直接点名。" : "直接输入问题，管理员会分派给合适的成员。" })
               : messages.map(function (m) {
                   if (m.role === "user") return h("div", { key: m.id, className: "ats-bubble user" }, h("div", { className: "ats-bubble-text" }, m.text));
                   var accent = colorOf(m, 0);
@@ -2338,7 +2349,10 @@ window.__ModuleLoader__.load({
                   el.style.height = "auto";
                   el.style.height = Math.min(280, Math.max(64, el.scrollHeight)) + "px";
                 },
-                onKeyDown: function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }
+                onKeyDown: function (e) {
+                  // Enter 发送，Shift+Enter 换行，⌘/Ctrl+Enter 也发送（长文本时更顺手）。
+                  if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+                }
               }),
               h("div", { className: "ats-composer-bar" },
                 h("button", { className: "ats-round", type: "button", title: "新建群聊", "aria-label": "新建群聊", onClick: openForm }, "＋"),
@@ -2789,11 +2803,11 @@ window.__ModuleLoader__.load({
         result.error ? h("div", { className: "ats-sub", style: { color: "#dc2626" } }, result.error) : null,
         h("div", { className: "ats-list" },
           !result.searched
-            ? h("div", { className: "ats-empty" }, "输入关键词，搜索所有私聊与群聊记录")
+            ? h(Empty, { icon: "🔎", title: "输入关键词开始检索", hint: "会搜索所有私聊与群聊记录。" })
             : result.loading
-              ? h("div", { className: "ats-empty" }, "正在检索…")
+              ? h(Empty, { icon: "⏳", title: "正在检索…" })
               : result.hits.length === 0
-                ? h("div", { className: "ats-empty" }, "没有找到包含「" + query.trim() + "」的消息")
+                ? h(Empty, { icon: "🫥", title: "没有找到包含「" + query.trim() + "」的消息", hint: "换个词，或减少筛选条件。" })
                 : h("div", { className: "ats-search-results" },
                     h("div", { className: "ats-sub", style: { padding: "4px 2px 8px" } }, "共 " + String(result.total) + " 条，显示前 " + String(result.hits.length) + " 条"),
                     result.hits.map(function (hit) {
@@ -3158,6 +3172,27 @@ window.__ModuleLoader__.load({
       function pick(id) {
         setTab(function (prev) { return prev === id ? prev : (writeTab(id), id); });
       }
+
+      // 全局快捷键：⌘1..6 切标签，/ 聚焦搜索（不在输入框里时）。
+      useEffect(function () {
+        var ids = ["chat", "team", "records", "balance", "roles", "skills"];
+        function onKey(e) {
+          if ((e.metaKey || e.ctrlKey) && /^[1-6]$/.test(e.key)) {
+            var id = ids[Number(e.key) - 1];
+            if (id !== undefined) { e.preventDefault(); pick(id); }
+            return;
+          }
+          if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
+            var el = e.target;
+            var tag = el !== null && el !== undefined && el.tagName ? String(el.tagName).toLowerCase() : "";
+            if (tag === "input" || tag === "textarea" || (el && el.isContentEditable)) return;
+            var box = document.querySelector(".ats-search") || document.querySelector(".ats-input") || document.querySelector("textarea");
+            if (box !== null && typeof box.focus === "function") { e.preventDefault(); box.focus(); }
+          }
+        }
+        window.addEventListener("keydown", onKey);
+        return function () { window.removeEventListener("keydown", onKey); };
+      }, []);
       function tabBtn(id, label, icon) {
         var on = tab === id;
         return h("button", {
