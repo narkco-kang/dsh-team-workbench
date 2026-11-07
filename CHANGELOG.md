@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2.55.2 — 2026-11-07
+
+- 重写插件说明：新增「核心功能 / 架构 / 记忆系统」三节；
+- 架构图覆盖 客户端 → 宿主路由 → team/chat/memory/stt/skills → subagents 四层；
+- 记忆系统写清 L0–L3 各层存什么、何时写、怎么用，以及 BM25+向量 RRF 混合召回与 supersede 策略；
+- package.json 的 description 同步突出部门智能体、分层记忆与检索能力。
+
 ## 2.55.1 — 2026-11-07
 
 - 按上游市场协议补 `dsh.client.inject: ['dsh-desktop-workbenches']`（probe 校验必需）；
