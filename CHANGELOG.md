@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2.6.3 — 2026-11-07
+
+- 左栏不再用自拟样式：CSS 逐条照抄 DS-Bot 的 SHELL_CSS（--bt-* 变量、.bt-side/.bt-side-top/
+  .bt-brand/.bt-round/.bt-list/.bt-row/.bt-row-body/.bt-row-name/.bt-row-title/.bt-row-preview/
+  .bt-tag/.bt-unread），结构与类名也照 DS-Bot：.bt-leftcol > .bt-side > [.bt-side-top, .bt-list]；
+- 列表合并成一列（群 + 人），按最近动静排序，宽度 280（DS-Bot 的 FALLBACK_SIDEBAR_WIDTH）；
+- 群头像改成 DS-Bot 的堆叠（.bt-mark + .bt-stack，36px 内叠 26/22）。
+
 ## 2.6.2 — 2026-11-07
 
 - 左栏按 DS-Bot 的左侧栏重做：宽 264、浅灰底、行高 54、圆角 12、名字 14/20、预览 13/18、行距 3；
