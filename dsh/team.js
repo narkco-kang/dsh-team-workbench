@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '2.84.0'
+const PLUGIN_VERSION = '2.84.1'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -884,7 +884,10 @@ export async function dispatchToMember(ctx, parent, rawMember, task, signal) {
       const personaPrompt = '【角色】你是团队中的「' + member.name + '」，职责：' + member.role + '。' +
         (member.instructions.trim().length > 0 ? '\n【角色说明】' + member.instructions.trim() : '') +
         '\n\n【任务】\n' + task
-      const reused = await runPersistentAgent(ctx, member, route, personaPrompt, 60000)
+      // 常驻 Agent 默认关闭：实测当 followup 不被驱动时 whenIdle 会等到超时，
+      // 每次派发白等 60s。设 TW_REUSE_AGENTS=1 才启用（用于后续验证）。
+      const reuseEnabled = process.env.TW_REUSE_AGENTS === '1'
+      const reused = reuseEnabled ? await runPersistentAgent(ctx, member, route, personaPrompt, 15000) : undefined
       result = reused !== undefined && reused.output.length > 0
         ? reused
         : await runOnRoute(ctx, parent, member, route, task, bounds)
