@@ -32,6 +32,39 @@ function memoryPath() {
   return join(harnessHome(), 'team-workbench', MEMORY_FILE)
 }
 
+/** 中文虚词二元组：不参与召回打分。 */
+const STOPWORDS = new Set([
+  '的了', '我们', '你们', '他们', '这个', '那个', '可以', '就是', '然后', '而且',
+  '但是', '因为', '所以', '如果', '已经', '还是', '一个', '不是', '没有', '什么',
+  '怎么', '这样', '那样', '以及', '并且', '或者', '就是', '现在', '时候', '一下'
+])
+
+/** 同义词组：查询命中任意一个词，就把同组其它词一起拿来匹配。 */
+const SYNONYMS = [
+  ['上线', '发布', '发版', '交付', '上线时间'],
+  ['接口', 'api', '联调', '对接'],
+  ['验收', '验收标准', '验收条件', '测试通过'],
+  ['需求', '功能', '特性', '诉求'],
+  ['测试', '用例', 'qa', '自测'],
+  ['文档', '说明', '说明书', '手册'],
+  ['预算', '报价', '费用', '成本'],
+  ['排期', '工期', '时间表', '计划'],
+  ['风险', '隐患', '阻塞'],
+  ['用户', '客户', '甲方']
+]
+
+/** 把查询词扩展成「原词 + 同组其它词」，并去掉停用词。 */
+export function expandTerms(value) {
+  const base = tokenize(value).filter((token) => !STOPWORDS.has(token))
+  const expanded = new Set(base)
+  for (const group of SYNONYMS) {
+    const hit = group.some((word) => value.toLowerCase().includes(word))
+    if (!hit) continue
+    for (const word of group) for (const token of tokenize(word)) expanded.add(token)
+  }
+  return expanded
+}
+
 function emptyMemory() {
   return { version: MEMORY_VERSION, persona: { items: [], updatedAt: '' }, private: {}, rooms: {} }
 }
@@ -139,15 +172,22 @@ function atomStats(atoms) {
   const df = new Map()
   let total = 0
   for (const atom of atoms) {
-    const terms = new Set(tokenize(atom.text))
+    const terms = new Set(atomTerms(atom))
     total += terms.size
     for (const term of terms) df.set(term, (df.get(term) || 0) + 1)
   }
   return { df, N: atoms.length, avg: atoms.length > 0 ? total / atoms.length : 0 }
 }
 
+function atomTerms(atom) {
+  const textTerms = tokenize(atom.text).filter((token) => !STOPWORDS.has(token))
+  const keyTerms = tokenize(atom.key).filter((token) => !STOPWORDS.has(token))
+  // key 是人工/模型标注的属性名，命中它比命中正文更有价值。
+  return textTerms.concat(keyTerms, keyTerms)
+}
+
 function bm25(atom, queryTerms, stats) {
-  const terms = tokenize(atom.text)
+  const terms = atomTerms(atom)
   const length = terms.length
   const tf = new Map()
   for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1)
@@ -171,7 +211,7 @@ function recencyBoost(atom) {
 
 /** 同 key 只留最新；按 BM25 + 重要度 + 新鲜度 + 访问次数排序。 */
 function rankAtoms(atoms, userText) {
-  const queryTerms = new Set(tokenize(userText))
+  const queryTerms = expandTerms(userText)
   const stats = atomStats(atoms)
   const byKey = new Map()
   for (const atom of atoms) {
@@ -216,7 +256,17 @@ export function memoryBlock(slot, persona, userText) {
 export function addAtom(slot, raw) {
   const atom = normalizeAtom(raw)
   if (atom.text.length === 0) return false
-  if (slot.atoms.some((item) => item.text === atom.text || jaccardSimilar(item.text, atom.text) >= SIMILARITY_MERGE)) return false
+  const exact = slot.atoms.find((item) => item.text === atom.text)
+  if (exact !== undefined) { exact.hits = (exact.hits || 0) + 1; return false }
+  // 近重复不新增，而是合并：留更长的那句、取更高重要度、累加访问次数。
+  const near = slot.atoms.find((item) => jaccardSimilar(item.text, atom.text) >= SIMILARITY_MERGE)
+  if (near !== undefined) {
+    if (atom.text.length > near.text.length) near.text = atom.text
+    near.importance = Math.max(near.importance, atom.importance)
+    near.hits = (near.hits || 0) + 1
+    if (atom.key.length > 0 && near.key.length === 0) near.key = atom.key
+    return false
+  }
   if (atom.key.length > 0) slot.atoms = slot.atoms.filter((item) => item.key !== atom.key)
   slot.atoms.push(atom)
   if (slot.atoms.length > MAX_ATOMS) {
@@ -247,6 +297,17 @@ export function removePersona(persona, itemId) {
   return persona.items.length !== before
 }
 
+/** 记忆规模：面板顶部展示，也方便排查「怎么没记住」。 */
+export function memoryStats(memory) {
+  const slots = [...Object.values(memory.private), ...Object.values(memory.rooms)]
+  return {
+    conversations: slots.length,
+    atoms: slots.reduce((total, slot) => total + slot.atoms.length, 0),
+    scenes: slots.filter((slot) => slot.l2.summary.trim().length > 0).length,
+    persona: memory.persona.items.length
+  }
+}
+
 /** 跨会话检索事实：记忆面板的关键词下钻。 */
 export function searchMemory(memory, query, limit = 30) {
   const rows = []
@@ -256,7 +317,7 @@ export function searchMemory(memory, query, limit = 30) {
   for (const [id, slot] of Object.entries(memory.rooms)) {
     for (const atom of slot.atoms) rows.push({ kind: 'room', id, atom })
   }
-  const terms = new Set(tokenize(query))
+  const terms = expandTerms(query)
   if (terms.size === 0) return rows.slice(0, limit)
   const stats = atomStats(rows.map((row) => row.atom))
   return rows

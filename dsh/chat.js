@@ -23,7 +23,7 @@ import {
   readJson,
   text
 } from './team.js'
-import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, removeAtom, removePersona, saveMemory, searchMemory, slotOf } from './memory.js'
+import { addAtom, addPersona, compactIfNeeded, loadMemory, memoryBlock, memoryStats, removeAtom, removePersona, saveMemory, searchMemory, slotOf } from './memory.js'
 
 const CHATS_ROUTE = ROUTE_BASE + '/chats'
 const PRIVATE_ROUTE = ROUTE_BASE + '/chats/private'
@@ -618,7 +618,7 @@ export function apply(ctx) {
           const memory = await loadMemory()
           const q = url.searchParams.get('q') || ''
           if (id.length === 0) {
-            if (q.trim().length === 0) return json({ ok: true, persona: memory.persona, private: memory.private, rooms: memory.rooms })
+            if (q.trim().length === 0) return json({ ok: true, stats: memoryStats(memory), persona: memory.persona, private: memory.private, rooms: memory.rooms })
             const store = await loadStore()
             const names = new Map(store.members.map((member) => ['private:' + member.id, member.name]))
             for (const room of (await loadChats()).rooms) names.set('room:' + room.id, room.name)
@@ -634,7 +634,7 @@ export function apply(ctx) {
           const slot = slotOf(memory, kind, id)
           // 兼容旧的 summary/facts 字段名，同时给出分层的 l2/atoms 与画像。
           return json({
-            ok: true, kind, id, persona: memory.persona,
+            ok: true, kind, id, stats: memoryStats(memory), persona: memory.persona,
             memory: {
               summary: slot.l2.summary,
               facts: slot.atoms.map((atom) => ({ id: atom.id, text: atom.text, at: atom.at, importance: atom.importance, key: atom.key })),

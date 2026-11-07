@@ -1568,7 +1568,7 @@ window.__ModuleLoader__.load({
         var kind = target.kind === "group" ? "room" : "private";
         fetchMemory(kind, target.id).then(function (payload) {
           var slot = payload.memory || { summary: "", facts: [] };
-          setMemoryData(Object.assign({}, slot, { persona: payload.persona || { items: [] } }));
+          setMemoryData(Object.assign({}, slot, { persona: payload.persona || { items: [] }, stats: payload.stats || null }));
         })
           .catch(function (error) { setBanner(String(error && error.message ? error.message : error)); });
       };
@@ -1875,6 +1875,10 @@ window.__ModuleLoader__.load({
         memoryOpen && target !== null
           ? h("div", { className: "ats-im-form", style: { maxHeight: "60%", overflow: "auto" } },
               h("div", { className: "ats-preset-title" }, "长期记忆 · " + (currentRoom ? currentRoom.name : title)),
+              memoryData.stats
+                ? h("div", { className: "ats-sub", style: { opacity: .6, fontSize: "11px" } },
+                    "共 " + String(memoryData.stats.atoms) + " 条事实 · " + String(memoryData.stats.scenes) + " 段场景 · 画像 " + String(memoryData.stats.persona) + " 条")
+                : null,
               h("div", { className: "ats-bar", style: { margin: "6px 0" } },
                 h("input", {
                   className: "ats-input", style: { flex: "1 1 auto" }, value: memoryQuery,
