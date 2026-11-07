@@ -3297,7 +3297,7 @@ window.__ModuleLoader__.load({
       var currentMember = target !== null && target.kind === "private" ? members.filter(function (m) { return m.memberId === target.id; })[0] : null;
       var currentRoom = target !== null && target.kind === "group" ? rooms.filter(function (r) { return r.id === target.id; })[0] : null;
       var title = currentMember ? currentMember.name : currentRoom ? currentRoom.name : "";
-      var responderLabel = currentRoom ? (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "只回应 @" : "管理员先答") : "";
+      var responderLabel = currentRoom ? (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "只回应 @" : currentRoom.responder === "everyone" ? "全员轮流" : "管理员先答") : "";
       var relayDepth = currentRoom && typeof currentRoom.relayDepth === "number" ? currentRoom.relayDepth : 1;
       var autoParallel = (function (count) { return Math.max(3, Math.min(5, Math.ceil(Math.max(1, count) / 2))); })(currentRoom ? currentRoom.memberIds.length : 3);
       var parallelLabel = currentRoom ? (currentRoom.parallel === false ? "串行" : "并行 " + (currentRoom.maxParallel ? String(currentRoom.maxParallel) : "自动(" + String(autoParallel) + ")")) : "";
@@ -3306,7 +3306,7 @@ window.__ModuleLoader__.load({
         ? [
             currentRoom.adminName ? "👑 " + currentRoom.adminName : "",
             "👥 " + String(currentRoom.memberIds.length),
-            "💬 " + (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "@ 才答" : "管理员先答"),
+            "💬 " + (currentRoom.responder === "auto" ? "自动挑人" : currentRoom.responder === "mention" ? "@ 才答" : currentRoom.responder === "everyone" ? "全员轮流" : "管理员先答"),
             "🔁 " + String(relayDepth),
             "⚡ " + (currentRoom.parallel === false ? "串行" : "并行" + (currentRoom.maxParallel ? "(" + String(currentRoom.maxParallel) + ")" : ""))
           ].filter(function (part) { return part.length > 0; }).join("  ·  ")
@@ -4326,7 +4326,7 @@ window.__ModuleLoader__.load({
                   [{ value: "", label: "管理员（默认首位）" }].concat(members.map(function (m) { return { value: m.memberId, label: "管理员：" + m.name }; })).map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 ),
                 h("select", { className: "ats-select", style: { flex: "0 0 120px" }, value: form.responder || "lead", onChange: function (e) { setForm(Object.assign({}, form, { responder: e.target.value })); } },
-                  [{ value: "lead", label: "应答：管理员" }, { value: "auto", label: "应答：自动挑人" }, { value: "mention", label: "应答：只回应 @" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
+                  [{ value: "lead", label: "应答：管理员" }, { value: "everyone", label: "应答：全员轮流" }, { value: "auto", label: "应答：自动挑人" }, { value: "mention", label: "应答：只回应 @" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })
                 ),
                 h("select", { className: "ats-select", style: { flex: "0 0 110px" }, value: String(form.relayDepth === undefined ? 1 : form.relayDepth), onChange: function (e) { setForm(Object.assign({}, form, { relayDepth: Number(e.target.value) })); } },
                   [{ value: "0", label: "接力：不转发" }, { value: "1", label: "接力：1 层" }, { value: "2", label: "接力：2 层" }].map(function (o) { return h("option", { key: o.value, value: o.value }, o.label); })

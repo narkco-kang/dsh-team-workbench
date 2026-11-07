@@ -110,7 +110,8 @@ function ensureChiefRoom(chats, store) {
 const CHAT_VERSION = 1
 const MAX_MESSAGES = 200
 const HISTORY_WINDOW = 12
-const MAX_TURNS_PER_MESSAGE = 5
+// DS-Bot 的全员轮流模式一条消息要让每个成员都说一次，所以上限放宽到 12。
+const MAX_TURNS_PER_MESSAGE = 12
 const MAX_MENTIONS = 3
 const MAX_ROOMS = 24
 
@@ -479,7 +480,7 @@ export async function sendPrivate(ctx, parent, member, userText, signal, options
 }
 
 /** 应答模式：lead = 管理员先答，auto = 按内容挑最合适的人，mention = 只回应 @。 */
-const RESPONDERS = ['lead', 'auto', 'mention']
+const RESPONDERS = ['lead', 'auto', 'mention', 'everyone']
 
 function responderOf(room) {
   return RESPONDERS.includes(room.responder) ? room.responder : 'lead'
@@ -571,6 +572,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     const picked = pickAutoResponder(userText, alive, used)
     pickedId = picked ? picked.id : (admin ? admin.id : '')
     start = picked ? [picked] : (admin ? [admin] : [])
+  } else if (responder === 'everyone') {
+    // DS-Bot 全员轮流：管理员先，其余按名册顺序，一个说完下一个再说。
+    const ordered = admin !== undefined && admin !== null ? [admin, ...alive.filter((m) => m.id !== admin.id)] : alive
+    start = ordered
   } else {
     start = admin ? [admin] : []
   }
@@ -622,7 +627,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     return { member, reply, step }
   }
 
-  const runBatch = async (batch, depth, lastSpeaker) => {
+  const runBatch = async (batch, depth, lastSpeaker, serial) => {
     const results = new Array(batch.length)
     let cursor = 0
     // 超出并发的成员进队列，状态条显示「排队 N 位」。
@@ -657,7 +662,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         }
       }
     }
-    const lanes = Math.min(parallelOn ? maxParallel : 1, batch.length)
+    const lanes = serial ? 1 : Math.min(parallelOn ? maxParallel : 1, batch.length)
     await Promise.all(Array.from({ length: lanes }, lane))
     target.progress.queued = []
     return results.filter((entry) => entry !== undefined)
@@ -673,7 +678,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     if (batch.length === 0) break
     for (const member of batch) used.add(member.id)
     await persist()
-    const results = await runBatch(batch, depth, lastSpeaker)
+    const results = await runBatch(batch, depth, lastSpeaker, responder === 'everyone' && asked.length === 0)
     target.progress.parallel = []
     const next = []
     for (const { member, reply } of results) {
