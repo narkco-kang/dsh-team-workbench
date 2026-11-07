@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-07T21:14:44.298Z",
+  "updatedAt": "2026-11-07T21:51:46.934Z",
   "packages": [
     {
       "name": "dsh-team-workbench",
-      "version": "2.93.0",
-      "tgz": "dsh-team-workbench-2.93.0.tgz",
-      "sha256": "bdc0269f53d7800cecd74abc2a39dd92f117f91df49319497df2ad512a6cb09c",
-      "bytes": 2025342,
-      "updatedAt": "2026-11-07T21:14:44.298Z",
+      "version": "2.93.1",
+      "tgz": "dsh-team-workbench-2.93.1.tgz",
+      "sha256": "b67e1bc8f1127034861fd0b17693d9b658bda5ec01d1eeb23aef3b813e216a66",
+      "bytes": 2025523,
+      "updatedAt": "2026-11-07T21:51:46.933Z",
       "description": "智能体团队 · DSH 网页客户端插件：具名智能体各有可回退模型路由与 3D 头像，私聊/群聊（点名接力、受限并行）；部门 = 一个智能体（主管分派、子智能体并行、汇总）；记录检索（命中高亮、今天/昨天/更早）、L0–L3 分层记忆（原子事实/摘要/画像 + BM25+向量混合召回）、语音输入与头像素材库。",
       "engines": {
         "bundle": {

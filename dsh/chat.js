@@ -86,8 +86,8 @@ function ensureChiefRoom(chats, store) {
       name: CHIEF_ROOM_NAME,
       adminId: chiefId.length > 0 ? chiefId : memberIds[0],
       memberIds,
-      responder: 'lead',
-      relayDepth: 2,
+      responder: 'everyone',
+      relayDepth: 1,
       createdAt: new Date().toISOString(),
       updatedAt: '',
       messages: []
@@ -98,10 +98,14 @@ function ensureChiefRoom(chats, store) {
   const adminId = chiefId.length > 0 ? chiefId : (memberIds.includes(room.adminId) ? room.adminId : memberIds[0])
   if (room.adminId !== adminId) { room.adminId = adminId; changed = true }
   if (room.name !== CHIEF_ROOM_NAME) { room.name = CHIEF_ROOM_NAME; changed = true }
-  if (room.responder !== 'lead') { room.responder = 'lead'; changed = true }
-  if (room.relayDepth !== 2) { room.relayDepth = 2; changed = true }
-  if (room.memberIds.length !== memberIds.length || room.memberIds.some((id, index) => id !== memberIds[index])) {
-    room.memberIds = memberIds
+  // 用户改过的应答方式/接力层数不再被覆盖；只有缺省时才补默认值。
+  if (!RESPONDERS.includes(text(room.responder))) { room.responder = 'lead'; changed = true }
+  if (!Number.isSafeInteger(Number(room.relayDepth))) { room.relayDepth = 1; changed = true }
+  // 成员：保留用户手工加入的子智能体（sub: 前缀），只同步顶层成员的增删。
+  const kept = Array.isArray(room.memberIds) ? room.memberIds.filter((id) => text(id).startsWith('sub:')) : []
+  const wanted = [...memberIds, ...kept.filter((id) => !memberIds.includes(id))]
+  if (room.memberIds.length !== wanted.length || room.memberIds.some((id, index) => id !== wanted[index])) {
+    room.memberIds = wanted
     changed = true
   }
   return changed
