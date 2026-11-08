@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 3.4.1 — 2026-11-08
+
+修复「智能体团队折叠按钮消失、面板白屏」：
+- 3.4.0 把 useState 的 setter 误存成 jumpToLatest，导致 setJumpToLatest 未定义，
+  ChatPanel 渲染即 ReferenceError，宿主挂载点被清空；
+- 新增 test/client-state.test.mjs：调用到的 setXxx 必须有声明、useState 的 setter 命名必须以 set 开头。
+
 ## 3.4.0 — 2026-11-08
 
 修复「往上翻历史会被拉回最新」：
