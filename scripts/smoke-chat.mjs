@@ -110,6 +110,15 @@ check('被 @ 的成员确实收到了任务', prompts.some((p) => p.includes('@ 
 const direct = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '@' + engineer.name + ' 你直接说结论' })
 check('用户 @ 成员时跳过管理员', direct.ok === true && direct.turns.length === 1 && direct.turns[0].name === engineer.name, direct.turns && direct.turns[0] && direct.turns[0].name)
 
+// 根因回归：独立提问不能继承上一轮的话题（实测「最近AI产品热点」被答成 2.16.0 发布）。
+const beforeFresh = prompts.length
+await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '最近AI产品热点' })
+const freshPrompts = prompts.slice(beforeFresh)
+const freshMember = freshPrompts.filter((p) => p.includes('你是成员「'))
+check('独立提问不带上一轮成员答案', freshMember.length > 0 && freshMember.every((p) => !p.includes('两天完成')), 'member prompts=' + String(freshMember.length))
+check('独立提问不带上一轮用户消息', freshPrompts.every((p) => !p.includes('这个需求两天能做吗')), '')
+check('本轮消息确实交给了成员', freshMember.some((p) => p.includes('最近AI产品热点')), '')
+
 const testAuto = members.find((m) => m.name === '测试自动化工程师') || members[2]
 const autoRoomRes = await call('/api/team-workbench/chats/rooms', {
   action: 'create',

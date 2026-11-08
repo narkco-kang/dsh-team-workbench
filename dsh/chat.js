@@ -328,15 +328,27 @@ export function stripReceipts(value) {
   return out.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/** 独立提问（短句、非追问）不要塞历史：把上一轮话题（如 2.16.0 发布）带进新问题。 */
+/**
+ * 群聊背景的唯一来源：用户自己说过的话 + 上一条公开结论。
+ * 不喂任何成员的旧答案 —— 那些长段回答会把模型拽回上一轮话题（实测：一句
+ * 「最近AI产品热点」被 7 个子智能体答成 2.16.0 发布结论）。
+ * 且只有追问（「继续/展开/刚才…」）才带背景：独立提问不该继承旧话题。
+ */
 const FOLLOW_UP = /(继续|接着|然后|再|展开|详细|具体|刚才|上面|刚刚|前面|这个|那个|它|他们|为什么|怎么|如何|补充|总结|结论|看看|说明|讲讲)/u
 
 function backgroundLines(messages, userText) {
   const q = text(userText).trim()
-  if (q.length > 0 && q.length <= 12 && !FOLLOW_UP.test(q)) {
-    return ['（本轮是独立提问，忽略更早的群聊记录）', '']
+  if (q.length === 0 || !FOLLOW_UP.test(q)) return ['（本轮是独立提问：忽略更早的对话，只回答本条）', '']
+  const users = messages.filter((m) => m.role === 'user' && String(m.text).trim() !== q).slice(-3)
+  const lastPublic = [...messages].reverse().find((m) => m.role === 'agent' && m.hidden !== true)
+  const lines = []
+  if (users.length > 0) {
+    lines.push('之前用户说过（只是背景）：')
+    for (const m of users) lines.push('- ' + String(m.text).replace(/\s+/g, ' ').slice(0, 160))
   }
-  return ['最近的群聊记录（只是背景）：', transcript(messages.filter((m) => m.hidden !== true).slice(-6), '成员'), '']
+  if (lastPublic !== undefined) lines.push('上一条结论（只是背景）：' + String(lastPublic.text).replace(/\s+/g, ' ').slice(0, 200))
+  if (lines.length > 0) lines.push('')
+  return lines.length > 0 ? lines : ['（本轮是独立提问：忽略更早的对话，只回答本条）', '']
 }
 
 export function privatePrompt(member, messages, userText, memoryText) {
@@ -402,7 +414,7 @@ export function adminPrompt(room, members, messages, userText, memoryText) {
     '用户的新消息：',
     userText,
     '',
-    '只回答「用户的新消息」；更早的记录只是背景，不要延续旧话题。',
+    '只回答「用户的新消息」；上面的背景只用来理解指代，不要延续更早的话题。',
     '你是本群管理员：先给出你负责的回复。需要其他成员协作时，在回复里用 @成员名 指派',
     '（一条消息最多 @' + String(MAX_MENTIONS) + ' 人），不要替他们回答。回复要简洁。'
   ].join('\n')
@@ -421,7 +433,7 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
     (asker ? asker + ' @ 了你。' : '用户 @ 了你。') + '本轮消息：',
     userText,
     '',
-    '只回答「本轮消息」；更早的记录只是背景，不要延续旧话题。',
+    '只回答「本轮消息」。不要复述群规，不要延续上一轮话题；信息不足时按你的职责给出可执行结论，或点名请谁补充。',
     '你是成员「' + member.name + '」：只回答你这部分，结论要具体。需要别人接手时可以用 @成员名。'
   ].join('\n')
 }
