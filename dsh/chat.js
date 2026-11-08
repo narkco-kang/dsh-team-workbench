@@ -349,6 +349,12 @@ export function publicText(value, members) {
       .join('\n')
     out = out.replace(new RegExp('@' + escaped, 'g'), name)
   }
+  // 气泡是纯文本：**加粗**、__斜体__、`代码`、# 标题这些记号一律去掉，不要原样给用户看。
+  out = out
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^#{1,6}[ \t]*/gmu, '')
   // 只清理「行首的 @点名」这种残留；行内的 @ 可能是邮箱或代码，不能乱删。
   out = out.replace(/^[ \t]*@[\u4e00-\u9fa5A-Za-z0-9·]{1,12}[ \t]*/gmu, '')
   return out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
@@ -845,8 +851,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
             target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
             // 慢成员的回复是 hidden 的：不补一次汇总，用户就永远看不到它。
             // 但轮次还没结束就先不发 —— 否则用户会先看到一条成员原话，轮末再冒出一条汇总。
+            // 轮后补发也只补「用户还没收到任何回复」的那次，已经有结论就绝不发第二条
+            // （实测 17:18 又冒出一条 DX 工程师原话）。
             if (value !== undefined && value !== null && value.message !== null && value.message !== undefined) {
-              if (!turnActive) await summarizePending({ final: true })
+              if (!turnActive && !answeredSinceUser()) await summarizePending({ final: true })
             }
             await persist()
           }, async () => {
@@ -895,6 +903,14 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
   // 串行链保证同一时刻只有一个汇总在跑，covered 标记保证同一条内部回复不会被汇总两次。
   const chief = admin !== undefined && admin !== null ? admin : (alive[0] || null)
   let summaryChain = Promise.resolve()
+  // 这一轮用户是否已经收到过可见回复（从最后一条用户消息往后数）。
+  const answeredSinceUser = () => {
+    let lastUser = -1
+    for (let i = target.messages.length - 1; i >= 0; i -= 1) {
+      if (target.messages[i].role === 'user') { lastUser = i; break }
+    }
+    return target.messages.slice(lastUser + 1).some((message) => message.role === 'agent' && message.hidden !== true)
+  }
   const pendingHidden = () => {
     let lastVisible = -1
     for (let i = target.messages.length - 1; i >= 0; i -= 1) {

@@ -30,13 +30,16 @@ const subagents = {
     else if (prompt.includes('你是成员')) output = '成员回复：好。'
     const id = 'child-' + String(prompts.length)
     // 「慢测」让这一轮多花 1.5s：用来验证超过 grace 的后台成员也会被主管汇总。
-    const slow = prompt.includes('慢测') && prompt.includes('「前端开发者」')
+    // 「超慢测」7s：轮末最多等 6s，它一定在轮次结束后才完成 —— 用来验证不会再补出第二条气泡。
+    const verySlow = prompt.includes('超慢测') && prompt.includes('「前端开发者」')
+    const slow = !verySlow && prompt.includes('慢测') && prompt.includes('「前端开发者」')
+    const delay = verySlow ? 7000 : (slow ? 1500 : 0)
     return {
       id,
       childId: id,
-      result: slow
+      result: slow || verySlow
         ? new Promise((resolve) => {
-          setTimeout(() => resolve({ stopReason: 'completed', output: [{ type: 'text', text: output }] }), 1500)
+          setTimeout(() => resolve({ stopReason: 'completed', output: [{ type: 'text', text: output }] }), delay)
         })
         : Promise.resolve({ stopReason: 'completed', output: [{ type: 'text', text: output }] }),
       dispose: async () => {}
@@ -201,6 +204,20 @@ const slowVisible = (slow.messages || []).filter((m) => m.hidden !== true)
 check('慢成员也由主管汇总成一条', slowVisible.length === 2 && slowVisible[1].name === testAuto.name, slowVisible.map((m) => m.name + ':' + m.text.slice(0, 16)).join(' | '))
 check('慢成员的原始回答仍是内部记录', (slow.messages || []).some((m) => m.hidden === true && m.name === engineer.name), '')
 check('汇总提示词带上了慢成员的结论', prompts.some((p) => p.includes('请以管理员身份给用户一条汇总回复') && p.includes('结论：可以，两天完成。')), '')
+check('清洗去掉 markdown 记号', publicText('**结论**：\n- `v2.7.0` 先补', []) === '结论：\n- v2.7.0 先补', publicText('**结论**：\n- `v2.7.0` 先补', []))
+
+// 轮后才完成的成员：用户已经收到结论，就绝不再补第二条气泡（实测 17:18 冒出一条 DX 工程师原话）。
+process.env.TW_WORK_GRACE_MS = '500'
+const lateRoomRes = await call('/api/team-workbench/chats/rooms', {
+  action: 'create',
+  room: { name: '超慢成员房', adminId: testAuto.id, memberIds: [testAuto.id, engineer.id] }
+})
+const late = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: lateRoomRes.room.id, text: '超慢测：这个需求两天能做吗？' })
+await new Promise((resolve) => setTimeout(resolve, 3000))
+delete process.env.TW_WORK_GRACE_MS
+const lateNow = await call('/api/team-workbench/chats/group?id=' + encodeURIComponent(lateRoomRes.room.id))
+const lateVisible = (lateNow.messages || []).filter((m) => m.hidden !== true)
+check('轮后才完成的成员不再补第二条', lateVisible.length === 2 && late.turns.length === 1, 'visible=' + String(lateVisible.length) + ' turns=' + String(late.turns && late.turns.length))
 
 const balance = await call('/api/team-workbench/balance')
 check('余额接口可用（未配置 Key 时列出三个服务商）', balance.ok === true && Array.isArray(balance.items) && balance.items.length === 3, String((balance.items || []).length))
