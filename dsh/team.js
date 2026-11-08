@@ -60,7 +60,7 @@ const TRIGGER_DEFAULTS = { enabled: true, keywords: ['项目'], member: '' }
  *   看起来像装了另一个包——smoke-client.mjs 现在有断言把两者钉在一起。） */
 // 必须与 package.json 的 version 一致；scripts/smoke-client.mjs 会断言这一点，
 // 改了版本号忘改这里会直接冒烟失败（1.0.0 时就踩过一次）。
-const PLUGIN_VERSION = '3.5.1'
+const PLUGIN_VERSION = '3.5.2'
 
 /** 路由前缀。 */
 export const ROUTE_BASE = '/api/team-workbench'
@@ -505,20 +505,22 @@ export function clearSteerTarget(key) {
 }
 
 async function startChild(subagents, providerName, request) {
-  if (typeof subagents.start === 'function') return subagents.start(providerName, request)
-  if (typeof subagents.startActivation !== 'function') {
-    throw new Error('宿主 subagents 服务既无 start 也无 startActivation，无法派发')
+  const { signal, childId: _ignored, ...rest } = request
+  // 一次性子级（不带 childId）：宿主为 caller 投递起一个「临时本地会话」，
+  // 结果只回到调用方，而会话在结束后即销毁。
+  // 之前用固定 childId 复用会话：成员会把上一轮话题（2.16.0 发布）带进新问题，
+  // 而且这些常驻子会话会一直挂在父会话下，用户看到「子智能体的会话混进主会话」。
+  if (typeof subagents.startActivation === 'function') {
+    return subagents.startActivation({
+      provider: providerName,
+      delivery: 'caller',
+      request: rest,
+      signal: signal !== undefined && signal !== null ? signal : new AbortController().signal,
+      label: rest.label
+    })
   }
-  const { signal, childId, ...rest } = request
-  return subagents.startActivation({
-    provider: providerName,
-    // caller：结果只回到调用方，不再把子智能体卡片/回报投递到用户主会话。
-    delivery: 'caller',
-    ...(typeof childId === 'string' && childId.length > 0 ? { childId } : {}),
-    request: rest,
-    signal: signal !== undefined && signal !== null ? signal : new AbortController().signal,
-    label: rest.label
-  })
+  if (typeof subagents.start === 'function') return subagents.start(providerName, rest)
+  throw new Error('宿主 subagents 服务既无 start 也无 startActivation，无法派发')
 }
 
 async function runOnRoute(ctx, parent, member, route, task, signal) {
@@ -552,28 +554,13 @@ async function runOnRoute(ctx, parent, member, route, task, signal) {
   // 试过 toolFilter:{allow:[...]} 想给它加几个无参工具，**无效**：
   // toolFilter 只能收窄（restrict），不能把不在子目录中的工具加进去。
   // 结论：Jev 成员只能当「判断层」（回校准概率），当不了「执行层」。
-  // 持久会话（对齐 dsh-superagent 的 per-worker session）：同一成员复用同一个 childId，
-  // 宿主的本地子级支持后续消息与冷恢复，既保留上下文，也能吃到前缀缓存。
-  // 持久会话：首轮用固定 childId；但宿主在子会话仍登记时会拒绝 "already exists"，
-  // 这时退回一次性 childId（上下文仍由提示词里的历史窗口保证）。
-  // 不传 childId：宿主对「本地子级」的默认投递是 parent，
-  // 结果会出现在父会话（用户主聊天），而团队面板的 HTTP 调用一直等到超时。
-  // 走外部子级（无 childId）才会把结果返回给调用方。
+  // 一次性子级：每次派发新建、结束即销毁（见 startChild）。
+  // 不再复用常驻 childId —— 复用会让上一轮话题污染新问题，也会把子会话留在父会话里。
+  // 宿主的本地父级投递需要固定 childId，而 caller 投递可以用临时会话，所以显式走 caller。
   // 宿主偶尔不返回 activation（spawn 卡住）：给它 15 秒，超时就走失败回退，
   // 不能让团队面板无限等。
-  // superagent 优化版：固定 childId 复用会话，显式 delivery=caller 让结果回到调用方。
-  // 宿主报 already exists 时退回一次性 childId。
-  const reuseChild = process.env.TW_NO_CHILD_REUSE !== '1'
-  const reuseId = reuseChild ? 'team-' + member.id : ''
   const run = await Promise.race([
-    (async () => {
-      try {
-        return await startChild(subagents, providerName, { ...request, signal, ...(reuseId.length > 0 ? { childId: reuseId } : {}) })
-      } catch (error) {
-        if (!/already exists/i.test(String(error))) throw error
-        return startChild(subagents, providerName, { ...request, signal, childId: reuseId + '-r' + Date.now().toString(36) })
-      }
-    })(),
+    startChild(subagents, providerName, { ...request, signal }),
     new Promise((_resolve, reject) => setTimeout(() => reject(new Error('subagent activation timeout')), 15000))
   ])
   // 拿到子 agent 句柄后登记，供 steerActive 中途插话。

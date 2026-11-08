@@ -328,6 +328,17 @@ export function stripReceipts(value) {
   return out.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+/** 独立提问（短句、非追问）不要塞历史：把上一轮话题（如 2.16.0 发布）带进新问题。 */
+const FOLLOW_UP = /(继续|接着|然后|再|展开|详细|具体|刚才|上面|刚刚|前面|这个|那个|它|他们|为什么|怎么|如何|补充|总结|结论|看看|说明|讲讲)/u
+
+function backgroundLines(messages, userText) {
+  const q = text(userText).trim()
+  if (q.length > 0 && q.length <= 12 && !FOLLOW_UP.test(q)) {
+    return ['（本轮是独立提问，忽略更早的群聊记录）', '']
+  }
+  return ['最近的群聊记录（只是背景）：', transcript(messages.filter((m) => m.hidden !== true).slice(-6), '成员'), '']
+}
+
 export function privatePrompt(member, messages, userText, memoryText) {
   return [
     '【私聊】你在和用户一对一对话。',
@@ -386,10 +397,8 @@ export function adminPrompt(room, members, messages, userText, memoryText) {
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
-    '最近的群聊记录（只是背景）：',
     // 只喂公开记录：内部成员长篇回答（hidden）会把模型拽回旧话题。
-    transcript(messages.filter((message) => message.hidden !== true).slice(-12), '成员'),
-    '',
+    ...backgroundLines(messages, userText),
     '用户的新消息：',
     userText,
     '',
@@ -407,10 +416,8 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
-    '最近的群聊记录（只是背景）：',
     // 只喂公开记录：内部成员长篇回答（hidden）会把模型拽回旧话题。
-    transcript(messages.filter((message) => message.hidden !== true).slice(-12), '成员'),
-    '',
+    ...backgroundLines(messages, userText),
     (asker ? asker + ' @ 了你。' : '用户 @ 了你。') + '本轮消息：',
     userText,
     '',
@@ -720,9 +727,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         }
         await persist()
       },
-      // 子智能体产出即刻进群（DS-Bot 的观感，但没有它 7 次串行的代价）。
+      // 子智能体产出只作为内部记录（hidden），最后由主管汇总成一条对外可见的回复；
+      // 直接进群会造成「子智能体的会话刷屏在主会话」——这正是之前的问题。
       onSubResult: async (sub, text) => {
-        pushMessage(target.messages, messageOf('agent', { id: 'sub:' + sub.id, name: sub.name, emoji: '🧩' }, text))
+        pushMessage(target.messages, messageOf('agent', { id: 'sub:' + sub.id, name: sub.name, emoji: '🧩' }, text, { hidden: true }))
         await persist()
       },
       synthesize: target.synthesize !== false
