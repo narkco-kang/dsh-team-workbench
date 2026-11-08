@@ -386,12 +386,13 @@ export function adminPrompt(room, members, messages, userText, memoryText) {
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
-    '最近的群聊记录：',
-    transcript(messages, '成员'),
+    '最近的群聊记录（只是背景）：',
+    transcript(messages.slice(-12), '成员'),
     '',
     '用户的新消息：',
     userText,
     '',
+    '只回答「用户的新消息」；更早的记录只是背景，不要延续旧话题。',
     '你是本群管理员：先给出你负责的回复。需要其他成员协作时，在回复里用 @成员名 指派',
     '（一条消息最多 @' + String(MAX_MENTIONS) + ' 人），不要替他们回答。回复要简洁。'
   ].join('\n')
@@ -405,12 +406,13 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
     memoryText.length > 0 ? '' : null,
     memoryText.length > 0 ? memoryText : null,
     '',
-    '最近的群聊记录：',
-    transcript(messages, '成员'),
+    '最近的群聊记录（只是背景）：',
+    transcript(messages.slice(-12), '成员'),
     '',
     (asker ? asker + ' @ 了你。' : '用户 @ 了你。') + '本轮消息：',
     userText,
     '',
+    '只回答「本轮消息」；更早的记录只是背景，不要延续旧话题。',
     '你是成员「' + member.name + '」：只回答你这部分，结论要具体。需要别人接手时可以用 @成员名。'
   ].join('\n')
 }
@@ -731,11 +733,14 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     target.progress.parallel = target.progress.parallel.filter((name) => name !== member.name)
     target.progress.current = target.progress.parallel[0] || ''
     // 谁先完成谁先发言（参考 DS-Bot）：不必等同批其他人，用户能更早看到结果。
+    let stored = null
     if (reply.text.trim().length > 0) {
-      pushMessage(target.messages, messageOf('agent', member, reply.text, { stopReason: reply.stopReason }))
+      // 成员发言先记为内部记录（hidden），最后由主管汇总成一条对外可见的回复。
+      stored = messageOf('agent', member, reply.text, { stopReason: reply.stopReason, hidden: true })
+      pushMessage(target.messages, stored)
     }
     await persist()
-    return { member, reply, step }
+    return { member, reply, step, message: stored }
   }
 
   const runBatch = async (batch, depth, lastSpeaker, serial) => {
@@ -792,8 +797,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     const results = await runBatch(batch, depth, lastSpeaker, responder === 'everyone' && asked.length === 0)
     target.progress.parallel = []
     const next = []
-    for (const { member, reply } of results) {
-      turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason })
+    for (const { member, reply, message } of results) {
+      turns.push({ memberId: member.id, name: member.name, emoji: member.emoji, text: reply.text, stopReason: reply.stopReason, messageId: message !== null && message !== undefined ? message.id : '' })
       lastSpeaker = member.name
       for (const mentioned of parseMentions(reply.text, alive, used)) {
         if (next.length >= MAX_MENTIONS) break
@@ -804,6 +809,47 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     await persist()
     queue = next
     depth += 1
+  }
+  // 主管汇总：成员的回答只作为内部依据，对外只留一条主管的结论。
+  const chief = admin !== undefined && admin !== null ? admin : (alive[0] || null)
+  if (turns.length > 0 && chief !== null) {
+    const speakers = [...new Set(turns.map((turn) => turn.memberId))]
+    if (speakers.length === 1) {
+      // 只有一个人说话（例如用户直接 @ 某人）：他的回答本身就是结论，直接公开。
+      const own = target.messages.find((message) => message.id === turns[0].messageId)
+      if (own !== undefined) delete own.hidden
+    } else if (target.synthesize !== false) {
+      try {
+        const summaryPrompt = [
+          '【群聊 · ' + target.name + '】',
+          '成员：' + alive.map((m) => m.name).join('、') + '；你是管理员：' + chief.name,
+          personaOf(chief),
+          '',
+          '用户的新消息：',
+          userText,
+          '',
+          '各成员的回答：',
+          turns.map((turn) => turn.name + '：' + turn.text).join('\n\n'),
+          '',
+          '请以管理员身份给用户一条汇总回复：先给结论，再列 2-5 条要点（谁负责什么），不要复述过程，不要 @ 任何人，不要用「成员 A 说了」这种转述。'
+        ].join('\n')
+        const raw = await runMember(ctx, parent, chief, summaryPrompt, signal, { synthesize: false })
+        const summary = stripReceipts(raw.text)
+        if (summary.trim().length === 0) throw new Error('empty summary')
+        pushMessage(target.messages, messageOf('agent', chief, summary, { stopReason: raw.stopReason }))
+        target.progress.steps.push({ name: chief.name + '（汇总）', startedAt: new Date().toISOString(), phase: 'done', ms: 0, emoji: chief.emoji, summary: '已汇总' })
+      } catch (error) {
+        // 汇总失败就放出管理员自己的那条，至少用户能看到一条回复。
+        const fallbackId = turns[0] !== undefined ? turns[0].messageId : ''
+        const fallback = target.messages.find((message) => message.id === fallbackId)
+        if (fallback !== undefined) delete fallback.hidden
+      }
+    } else {
+      for (const turn of turns) {
+        const own = target.messages.find((message) => message.id === turn.messageId)
+        if (own !== undefined) delete own.hidden
+      }
+    }
   }
   target.progress.current = ''
   target.progress.finishedAt = new Date().toISOString()
@@ -969,7 +1015,11 @@ export async function chatOverview(ctx) {
     : (member.roleRef.id.length > 0
       ? (roleCats.get(member.roleRef.id) || '')
       : (roleCatsByName.get(String(member.name || '').replace(/\s*\d+$/u, '').trim()) || ''))
-  const lastOf = (messages) => (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1] : null)
+  const visibleOf = (messages) => (Array.isArray(messages) ? messages.filter((message) => message.hidden !== true) : [])
+  const lastOf = (messages) => {
+    const visible = visibleOf(messages)
+    return visible.length > 0 ? visible[visible.length - 1] : null
+  }
   return {
     ok: true,
     private: store.members.map((member) => {
@@ -981,7 +1031,7 @@ export async function chatOverview(ctx) {
         role: member.role,
         emoji: member.emoji,
         color: member.color,
-        count: thread && Array.isArray(thread.messages) ? thread.messages.length : 0,
+        count: thread ? visibleOf(thread.messages).length : 0,
         lastText: last ? last.text.slice(0, 120) : '',
         updatedAt: thread ? thread.updatedAt : '',
         departmentName: departmentOf(member),
@@ -1005,7 +1055,7 @@ export async function chatOverview(ctx) {
         responder: responderOf(room),
         synthesize: room.synthesize !== false,
         relayDepth: relayDepthOf(room),
-        count: Array.isArray(room.messages) ? room.messages.length : 0,
+        count: visibleOf(room.messages).length,
         lastText: last ? last.text.slice(0, 120) : '',
         updatedAt: room.updatedAt || ''
       }

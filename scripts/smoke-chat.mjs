@@ -96,7 +96,9 @@ const roomId = roomRes.room.id
 
 const group = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '这个需求两天能做吗？' })
 check('群聊管理员回复并 @ 了成员', group.ok === true && group.turns.length === 2, group.error || String(group.turns && group.turns.length))
-check('群聊消息落库（用户 + 2 条回复）', group.messages.length === 3, String(group.messages && group.messages.length))
+const groupVisible = group.messages.filter((m) => m.hidden !== true)
+check('群聊对外只有用户消息 + 管理员汇总', groupVisible.length === 2 && groupVisible[0].role === 'user' && groupVisible[1].name === group.turns[0].name, groupVisible.map((m) => m.name + ':' + m.text.slice(0, 20)).join(' | '))
+check('成员回答仍作为内部记录保留', group.messages.filter((m) => m.hidden === true).length >= 1, String(group.messages.length))
 check('被 @ 的成员确实收到了任务', prompts.some((p) => p.includes('@ 了你') && p.includes('两天')), '')
 
 const direct = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '@' + engineer.name + ' 你直接说结论' })
