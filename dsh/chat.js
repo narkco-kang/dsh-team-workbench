@@ -554,7 +554,7 @@ export async function sendPrivate(ctx, parent, member, userText, signal, options
   await saveChats(chats)
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
-  const memoryText = await memoryBlock(slot, memory.persona, userText)
+  const memoryText = await memoryBlock(slot, memory.persona, userText, { followUp: FOLLOW_UP.test(String(userText)) })
   const liveOptions = {
     ...(options !== undefined ? options : {}),
     onSubStep: async (subStep) => {
@@ -702,7 +702,7 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
   }
 
   const runTurn = async (member, depth, lastSpeaker) => {
-    const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText)
+    const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText, { followUp: FOLLOW_UP.test(String(userText)) })
     // DS-Bot：每个成员只看「上次看过之后」的新消息，不重复灌整段历史。
     target.seen = target.seen !== null && typeof target.seen === 'object' ? target.seen : {}
     const since = target.seen[member.id]

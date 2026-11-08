@@ -2,9 +2,9 @@
 /**
  * smoke-chat.mjs — 私聊 / 群聊服务端冒烟（假 subagents，不调真模型）。
  */
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const home = mkdtempSync(join(tmpdir(), 'wb-chat-'))
 process.env.DSH_HOME = home
@@ -118,6 +118,38 @@ const freshMember = freshPrompts.filter((p) => p.includes('你是成员「'))
 check('独立提问不带上一轮成员答案', freshMember.length > 0 && freshMember.every((p) => !p.includes('两天完成')), 'member prompts=' + String(freshMember.length))
 check('独立提问不带上一轮用户消息', freshPrompts.every((p) => !p.includes('这个需求两天能做吗')), '')
 check('本轮消息确实交给了成员', freshMember.some((p) => p.includes('最近AI产品热点')), '')
+
+// 根因回归 2：会话记忆不能把旧话题灌进新一轮。
+// 实测：记忆里存着「2.16.0 灰度 / 补 tag / No-Go」时，旧版会把它们无条件注入每一轮，
+// 于是「最近AI产品热点」也被答成发布结论。
+const memoryFile = join(process.env.DSH_HOME, 'team-workbench', 'memory.json')
+mkdirSync(dirname(memoryFile), { recursive: true })
+writeFileSync(memoryFile, JSON.stringify({
+  version: 2,
+  persona: { items: [], updatedAt: '' },
+  private: {},
+  rooms: {
+    [roomId]: {
+      l2: { summary: '2.16.0 成员人格注入定于 11-12 灰度、11-13 发布；11-09 补 tag=2.16.0；当前结论 No-Go。', at: new Date().toISOString() },
+      atoms: [
+        { id: 'a1', text: '补 tag 是 2.16.0 发布的前置条件，最新 tag 仅到 v2.6.0', key: '约束:tag', importance: 5, at: new Date().toISOString(), hits: 1 },
+        { id: 'a2', text: '11-12 18:00 四项判据全绿才能转 Go', key: '约束:判据', importance: 4, at: new Date().toISOString(), hits: 1 }
+      ],
+      since: 0,
+      updatedAt: new Date().toISOString()
+    }
+  }
+}, null, 1), 'utf8')
+
+const beforeMemory = prompts.length
+await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '最近AI产品热点' })
+const memoryFresh = prompts.slice(beforeMemory)
+check('记忆不把旧话题塞进独立提问', memoryFresh.length > 0 && memoryFresh.every((p) => !p.includes('2.16.0') && !p.includes('灰度')), 'prompts=' + String(memoryFresh.length) + ' 首个长度=' + String(memoryFresh[0] && memoryFresh[0].length))
+
+const beforeFollow = prompts.length
+await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '那个 tag 什么时候补' })
+const followPrompts = prompts.slice(beforeFollow)
+check('追问仍然能召回相关记忆', followPrompts.some((p) => p.includes('2.16.0')), 'prompts=' + String(followPrompts.length))
 
 const testAuto = members.find((m) => m.name === '测试自动化工程师') || members[2]
 const autoRoomRes = await call('/api/team-workbench/chats/rooms', {

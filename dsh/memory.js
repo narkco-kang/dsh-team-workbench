@@ -409,8 +409,108 @@ export async function recallAtomsHybrid(slot, userText, limit = RECALL_LIMIT) {
   }
 }
 
-/** 记忆块：L3 画像 + L2 场景 + 召回的 L1 事实。 */
-export async function memoryBlock(slot, persona, userText) {
+/**
+ * 记忆注入模式：
+ *   off    完全不注入；
+ *   strict 默认，只在「确实相关」时注入（3.5.4 起）；
+ *   all    3.5.3 及以前的行为（无条件把场景 + 6 条事实灌进每一轮），只用于排查。
+ */
+export function memoryMode(value) {
+  const raw = value === undefined || value === null ? process.env.TW_MEMORY_MODE : value
+  const mode = text(raw).trim().toLowerCase()
+  return mode === 'off' || mode === 'all' ? mode : 'strict'
+}
+
+const INJECT_ATOMS = 3
+const INJECT_SUMMARY_CHARS = 500
+const INJECT_PERSONA_ITEMS = 3
+const ATOM_VECTOR_GATE = 0.55
+
+/** 查询词与一段文本共享多少个（长度 ≥ 2 的）中文/英文词元。 */
+function sharedTermCount(query, corpus) {
+  const wanted = expandTerms(query)
+  if (wanted.size === 0) return 0
+  const have = new Set(tokenize(corpus))
+  let hits = 0
+  for (const term of wanted) if (have.has(term)) hits += 1
+  return hits
+}
+
+/**
+ * 只取「真的相关」的事实：BM25 命中，或向量相似度过门限。
+ * 一条都不相关就返回空 —— 这正是 3.5.3 之前缺失的一步：
+ * 旧的 recallAtomsHybrid 无论相关与否都会凑满 6 条，于是群里聊过的
+ * 「2.16.0 灰度 / tag / No-Go」被无条件塞进每一轮，连「最近AI产品热点」
+ * 这种独立提问也会被它拽回旧话题。
+ */
+async function gatedAtoms(slot, userText, limit) {
+  if (slot === undefined || slot === null || !Array.isArray(slot.atoms) || slot.atoms.length === 0) return []
+  const picked = []
+  const take = (atom) => {
+    if (picked.length >= limit) return
+    if (picked.some((entry) => entry.id === atom.id)) return
+    picked.push(atom)
+  }
+  // 语义相近优先：只有向量相似度过门限的事实才算「与这轮相关」。
+  try {
+    const settings = await loadSettings()
+    const cache = await loadVectors()
+    await ensureVectors(slot.atoms, settings, cache)
+    const [queryVector] = await embedTexts(settings, [userText])
+    const ranked = slot.atoms
+      .map((atom) => ({ atom, score: cosine(queryVector, (cache.items[atom.id] || {}).v) }))
+      .filter((entry) => entry.score >= ATOM_VECTOR_GATE)
+      .sort((a, b) => b.score - a.score)
+    for (const entry of ranked) take(entry.atom)
+    if (ranked.length > 0) return picked
+  } catch { /* 没有向量服务、或这一轮不许联网取向量：退回下面的关键词判定。 */ }
+  // 关键词兜底要求「两处词元重合」：像「最近AI产品热点」只和旧事实共享一个
+  // “产品”二字，不该把「名册 5 个身份」这种无关事实塞进来。
+  for (const entry of rankAtoms(slot.atoms, userText)) {
+    if (entry.relevant && sharedTermCount(userText, entry.atom.text) >= 2) take(entry.atom)
+  }
+  return picked
+}
+
+/** 记忆块：只在确实和本轮相关时注入，绝不无条件粘贴。 */
+export async function memoryBlock(slot, persona, userText, options) {
+  const opts = options !== undefined && options !== null && typeof options === 'object' ? options : {}
+  const mode = memoryMode(opts.mode)
+  if (mode === 'off') return ''
+  if (mode === 'all') return legacyMemoryBlock(slot, persona, userText)
+
+  const followUp = opts.followUp === true
+  const parts = []
+
+  const items = persona !== undefined && persona !== null && Array.isArray(persona.items) ? persona.items : []
+  const personaText = items
+    .slice(-INJECT_PERSONA_ITEMS)
+    .map((item) => text(item.text).trim())
+    .filter((line) => line.length > 0)
+    .join('；')
+  if (personaText.length > 0) parts.push('【用户偏好】' + personaText.slice(0, 400))
+
+  const summary = slot !== undefined && slot !== null && slot.l2 !== undefined && slot.l2 !== null ? text(slot.l2.summary).trim() : ''
+  if (summary.length > 0) {
+    // 场景摘要是「上一段话题」的浓缩，最容易把模型拉回去：默认要两处词元重合才带，
+    // 明确追问（继续/刚才/那个…）时一处重合就够。
+    const shared = sharedTermCount(userText, summary)
+    if (shared >= (followUp ? 1 : 2)) parts.push('【更早的话题 · 可能相关】' + summary.slice(0, INJECT_SUMMARY_CHARS))
+  }
+
+  const atoms = await gatedAtoms(slot, userText, INJECT_ATOMS)
+  if (atoms.length > 0) parts.push('【可能相关的事实】' + atoms.map((atom) => text(atom.text).trim().slice(0, 120)).join('；'))
+
+  if (parts.length === 0) return ''
+  return [
+    '【历史记忆 · 仅供参考】',
+    ...parts,
+    '（上面是更早对话留下的记录。只有与本轮消息确实相关时才使用；不相关就整段忽略，按用户这条消息本身回答。）'
+  ].join('\n')
+}
+
+/** 3.5.3 及以前的注入方式：L3 画像 + L2 场景 + 6 条召回，全部无条件灌进去。 */
+async function legacyMemoryBlock(slot, persona, userText) {
   const parts = []
   if (persona !== undefined && persona !== null && Array.isArray(persona.items) && persona.items.length > 0) {
     parts.push('【用户画像】' + persona.items.map((item) => item.text).join('；'))
