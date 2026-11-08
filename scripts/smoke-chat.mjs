@@ -14,6 +14,7 @@ const tools = []
 const prompts = []
 const parent = { id: 'parent' }
 let engineerName = '前端开发者'
+let relayMentionTo = ''
 
 const subagents = {
   list: () => ['spawn'],
@@ -22,7 +23,10 @@ const subagents = {
     prompts.push(prompt)
     let output = '收到。'
     if (prompt.includes('【群聊') && prompt.includes('你是本群管理员')) output = '我来安排：@' + engineerName + ' 你评估一下。'
-    else if (prompt.includes('你是成员「' + engineerName + '」')) output = '结论：可以，两天完成。'
+    else if (prompt.includes('你是成员「' + engineerName + '」')) {
+      output = '结论：可以，两天完成。'
+      if (relayMentionTo.length > 0 && prompt.includes('接力测')) output += '@' + relayMentionTo + ' 你补一下风险。'
+    }
     else if (prompt.includes('你是成员')) output = '成员回复：好。'
     const id = 'child-' + String(prompts.length)
     // 「慢测」让这一轮多花 1.5s：用来验证超过 grace 的后台成员也会被主管汇总。
@@ -106,6 +110,20 @@ const groupVisible = group.messages.filter((m) => m.hidden !== true)
 check('群聊对外只有用户消息 + 管理员汇总', groupVisible.length === 2 && groupVisible[0].role === 'user' && groupVisible[1].name === group.turns[0].name, groupVisible.map((m) => m.name + ':' + m.text.slice(0, 20)).join(' | '))
 check('成员回答仍作为内部记录保留', group.messages.filter((m) => m.hidden === true).length >= 1, String(group.messages.length))
 check('被 @ 的成员确实收到了任务', prompts.some((p) => p.includes('@ 了你') && p.includes('两天')), '')
+
+check('群聊对外文本不含 @ 指令', groupVisible.every((m) => !String(m.text).includes('@')), groupVisible.map((m) => String(m.text).slice(0, 24)).join(' | '))
+
+// 接力：成员之间的讨论留在内部记录/状态条，对外只发一条汇总，且不带 @ 指令。
+relayMentionTo = architect.name
+const relayRoomRes = await call('/api/team-workbench/chats/rooms', {
+  action: 'create',
+  room: { name: '接力房', adminId: architect.id, memberIds: [architect.id, engineer.id], relayDepth: 1 }
+})
+const relay = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: relayRoomRes.room.id, text: '接力测：这个需求两天能做吗？' })
+relayMentionTo = ''
+const relayVisible = (relay.messages || []).filter((m) => m.hidden !== true)
+check('接力两棒只对外一条汇总', relay.ok === true && relay.turns.length === 2 && relayVisible.length === 2, 'turns=' + String(relay.turns && relay.turns.length) + ' visible=' + String(relayVisible.length))
+check('接力消息不带 @ 点名', relayVisible.every((m) => !String(m.text).includes('@')), relayVisible.map((m) => String(m.text).slice(0, 24)).join(' | '))
 
 const direct = await call('/api/team-workbench/chats/group', { sessionId: 'session-1', id: roomId, text: '@' + engineer.name + ' 你直接说结论' })
 check('用户 @ 成员时跳过管理员', direct.ok === true && direct.turns.length === 1 && direct.turns[0].name === engineer.name, direct.turns && direct.turns[0] && direct.turns[0].name)

@@ -330,6 +330,31 @@ export function stripReceipts(value) {
 }
 
 /**
+ * 对外可见文本：去掉「@同事下指令」这类内部接力指令。
+ * 成员之间靠 @ 传棒是内部机制；用户看到的结论里不该出现点名，更不该出现
+ * 「@产品经理 请梳理 v2.7.0…」这种在用户面前给同事派活的句子。
+ */
+export function publicText(value, members) {
+  const names = (Array.isArray(members) ? members : [])
+    .map((member) => text(member !== null && member !== undefined ? member.name : ''))
+    .filter((name) => name.length > 0)
+    .sort((a, b) => b.length - a.length)
+  let out = text(value)
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // 整行以「@某人」开头的，是给同事的指令：删整行。
+    out = out
+      .split('\n')
+      .filter((line) => !new RegExp('^\\s*@' + escaped + '(?=[\\s，,：:]|$)').test(line))
+      .join('\n')
+    out = out.replace(new RegExp('@' + escaped, 'g'), name)
+  }
+  // 剩下不认识的 @xxx 也一并去掉，用户不需要看见这种标记。
+  out = out.replace(/@[^\s，,。；;：:]{1,20}/gu, '')
+  return out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
  * 群聊背景的唯一来源：用户自己说过的话 + 上一条公开结论。
  * 不喂任何成员的旧答案 —— 那些长段回答会把模型拽回上一轮话题（实测：一句
  * 「最近AI产品热点」被 7 个子智能体答成 2.16.0 发布结论）。
@@ -458,7 +483,7 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
   ].join('\n')
 }
 
-/** 一棒结束后的「一句结论」：去掉 markdown 与回执，取第一句有内容的，最多 60 字。 */
+/** 一棒结束后的「一句结论」：去掉 markdown 与回执，取第一句有内容的，最多 80 字（状态条里当讨论摘录用）。 */
 export function summaryOf(value) {
   const cleaned = stripReceipts(value)
     .replace(/```[\s\S]*?```/g, ' ')
@@ -468,7 +493,7 @@ export function summaryOf(value) {
   if (cleaned.length === 0) return ''
   const parts = cleaned.split(/[。！？!?；]/).filter((part) => part.trim().length > 0)
   const first = (parts[0] || cleaned).trim()
-  return first.length > 60 ? first.slice(0, 60) + '…' : first
+  return first.length > 80 ? first.slice(0, 80) + '…' : first
 }
 
 /** 从一段回复里解析 @成员名。 */
@@ -819,8 +844,9 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
           running.then(async (value) => {
             target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
             // 慢成员的回复是 hidden 的：不补一次汇总，用户就永远看不到它。
+            // 但轮次还没结束就先不发 —— 否则用户会先看到一条成员原话，轮末再冒出一条汇总。
             if (value !== undefined && value !== null && value.message !== null && value.message !== undefined) {
-              await summarizePending()
+              if (!turnActive) await summarizePending({ final: true })
             }
             await persist()
           }, async () => {
@@ -839,6 +865,8 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
   let queue = start
   let depth = 0
   let lastSpeaker = ''
+  // 一轮是否还在跑：决定「现在能不能对外发消息」。一轮只发一条公开回复。
+  let turnActive = true
 
   while (queue.length > 0 && turns.length < MAX_TURNS_PER_MESSAGE && depth <= relayDepth) {
     const room = MAX_TURNS_PER_MESSAGE - turns.length
@@ -877,20 +905,25 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
       .slice(lastVisible + 1)
       .filter((message) => message.role === 'agent' && message.hidden === true && message.covered !== true)
   }
-  const summarizePending = () => {
+  const summarizePending = (options) => {
+    const final = options !== undefined && options !== null && options.final === true
     const run = summaryChain.then(async () => {
       if (chief === null) return
       const pending = pendingHidden()
       if (pending.length === 0) return
       const speakers = [...new Set(pending.map((message) => message.memberId))]
       if (target.synthesize === false) {
-        for (const message of pending) { message.covered = true; delete message.hidden }
+        for (const message of pending) { message.covered = true; message.text = publicText(message.text, alive); delete message.hidden }
         await persist()
         return
       }
       if (speakers.length === 1 && pending.length === 1) {
+        // 轮次还没结束就先留着：早公开会让用户先看到一条成员原话，轮末又冒出一条汇总
+        // （实测「那个 tag 什么时候补」就看到 反馈分析师 + 产品部 两条）。
+        if (!final) return
         // 只有一个人说话（例如用户直接 @ 某人）：他的回答本身就是结论，直接公开。
         pending[0].covered = true
+        pending[0].text = publicText(pending[0].text, alive)
         delete pending[0].hidden
         await persist()
         return
@@ -913,13 +946,16 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         const summary = stripReceipts(raw.text)
         if (summary.trim().length === 0) throw new Error('empty summary')
         for (const message of pending) message.covered = true
-        pushMessage(target.messages, messageOf('agent', chief, summary, { stopReason: raw.stopReason }))
+        // 极端情况：管理员只写了一句「@某人 请…」，清洗后为空 —— 退回去掉 @ 的原文，别发空气泡。
+        const clean = publicText(summary, alive) || summary.replace(/@/g, '').trim()
+        pushMessage(target.messages, messageOf('agent', chief, clean, { stopReason: raw.stopReason }))
         target.progress.steps.push({ name: chief.name + '（汇总）', startedAt: new Date().toISOString(), phase: 'done', ms: 0, emoji: chief.emoji, summary: '已汇总' })
         await persist()
       } catch (error) {
         // 汇总失败：至少放出最后一条，别让用户什么都看不到。
         const last = pending[pending.length - 1]
         last.covered = true
+        last.text = publicText(last.text, alive)
         delete last.hidden
         await persist()
       }
@@ -937,8 +973,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
       }
     }
     await waitBackground(6000)
-    await summarizePending()
+    turnActive = false
+    await summarizePending({ final: true })
   }
+  turnActive = false
   target.progress.current = ''
   target.progress.finishedAt = new Date().toISOString()
   await saveChats(chats)
