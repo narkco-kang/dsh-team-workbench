@@ -12,6 +12,7 @@
  *
  * 存储：$DSH_HOME/team-workbench/memory.json（version 2）
  */
+import { appendFileSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -426,6 +427,23 @@ const INJECT_SUMMARY_CHARS = 500
 const INJECT_PERSONA_ITEMS = 3
 const ATOM_VECTOR_GATE = 0.55
 
+/** 记忆的总字数上限：随用户这句话的长度浮动，绝不允许「小问题 + 大段旧记忆」。 */
+const MEMORY_BUDGET_MIN = 120
+const MEMORY_BUDGET_MAX = 320
+
+/** TW_MEMORY_TRACE=1 时把每次注入决策记一行，方便核对「这轮到底喂了什么」。 */
+function writeTrace(line) {
+  if (process.env.TW_MEMORY_TRACE !== '1') return
+  try {
+    appendFileSync(join(harnessHome(), 'team-workbench', 'memory-inject.log'), new Date().toISOString() + ' ' + line + '\n')
+  } catch { /* 记录失败不影响聊天 */ }
+}
+
+/** 本轮消息与一段历史文本共享多少个词元：调用方用它判断「这轮是不是接着上一轮」。 */
+export function sharesTerms(a, b) {
+  return sharedTermCount(a, b)
+}
+
 /** 查询词与一段文本共享多少个（长度 ≥ 2 的）中文/英文词元。 */
 function sharedTermCount(query, corpus) {
   const wanted = expandTerms(query)
@@ -472,15 +490,42 @@ async function gatedAtoms(slot, userText, limit) {
   return picked
 }
 
-/** 记忆块：只在确实和本轮相关时注入，绝不无条件粘贴。 */
+/**
+ * 记忆块：旧记忆只能「在本轮明确接着上一轮」时出场，而且有硬预算。
+ *
+ * 两道结构性闸门（不是提示词措辞）：
+ *   1. continuity 硬门：调用方判断「这轮是不是接着上一轮说话」。不是 → 一条记忆都不注入，
+ *      与旧话题的相似度再高也没用。旧记忆因此不可能污染新会话。
+ *   2. 字数硬预算：整块记忆 ≤ max(120, 本句长度×2+40) 且 ≤ 320 字。8 个字的问题
+ *      最多配 120 字记忆 ——「1168 字旧计划压住 8 字新问题」在结构上不可能再发生。
+ */
 export async function memoryBlock(slot, persona, userText, options) {
   const opts = options !== undefined && options !== null && typeof options === 'object' ? options : {}
   const mode = memoryMode(opts.mode)
   if (mode === 'off') return ''
   if (mode === 'all') return legacyMemoryBlock(slot, persona, userText)
 
+  const question = text(userText).trim()
+  if (question.length === 0) return ''
+  if (opts.continuity === false) {
+    writeTrace('skip continuity=0 chars=0 q=' + JSON.stringify(question.slice(0, 40)))
+    return ''
+  }
+
   const followUp = opts.followUp === true
-  const parts = []
+  const sections = []
+
+  // 事实最具体，先给；场景摘要居中；用户偏好最后（超预算时最先被砍）。
+  const atoms = await gatedAtoms(slot, question, INJECT_ATOMS)
+  if (atoms.length > 0) {
+    sections.push({ key: 'atoms', text: '【可能相关的事实】' + atoms.map((atom) => text(atom.text).trim().slice(0, 120)).join('；') })
+  }
+
+  const summary = slot !== undefined && slot !== null && slot.l2 !== undefined && slot.l2 !== null ? text(slot.l2.summary).trim() : ''
+  if (summary.length > 0) {
+    const shared = sharedTermCount(question, summary)
+    if (shared >= (followUp ? 1 : 2)) sections.push({ key: 'summary', text: '【更早的话题 · 可能相关】' + summary.slice(0, INJECT_SUMMARY_CHARS) })
+  }
 
   const items = persona !== undefined && persona !== null && Array.isArray(persona.items) ? persona.items : []
   const personaText = items
@@ -488,25 +533,41 @@ export async function memoryBlock(slot, persona, userText, options) {
     .map((item) => text(item.text).trim())
     .filter((line) => line.length > 0)
     .join('；')
-  if (personaText.length > 0) parts.push('【用户偏好】' + personaText.slice(0, 400))
+  if (personaText.length > 0) sections.push({ key: 'persona', text: '【用户偏好】' + personaText.slice(0, 200) })
 
-  const summary = slot !== undefined && slot !== null && slot.l2 !== undefined && slot.l2 !== null ? text(slot.l2.summary).trim() : ''
-  if (summary.length > 0) {
-    // 场景摘要是「上一段话题」的浓缩，最容易把模型拉回去：默认要两处词元重合才带，
-    // 明确追问（继续/刚才/那个…）时一处重合就够。
-    const shared = sharedTermCount(userText, summary)
-    if (shared >= (followUp ? 1 : 2)) parts.push('【更早的话题 · 可能相关】' + summary.slice(0, INJECT_SUMMARY_CHARS))
+  const header = '【历史记忆 · 仅供参考】'
+  const footer = '（只在与本轮消息确实相关时参考；不相关就整段忽略，按用户这条消息本身回答。）'
+  const budget = Math.min(MEMORY_BUDGET_MAX, Math.max(MEMORY_BUDGET_MIN, question.length * 2 + 40))
+
+  const bodyOf = () => sections.map((section) => section.text).join('\n')
+  // +2 是两个换行：header\nbody\nfooter
+  const over = () => header.length + bodyOf().length + footer.length + 2 > budget
+  const drop = (key) => {
+    const index = sections.findIndex((section) => section.key === key)
+    if (index >= 0) sections.splice(index, 1)
+  }
+  let body = bodyOf()
+  if (over()) {
+    // 用户偏好最先让位；只有在「有具体事实」时才用事实顶掉场景摘要，
+    // 否则摘要就是这轮唯一的上下文，保留它、靠下面的截断收口。
+    drop('persona')
+    body = bodyOf()
+    if (over() && sections.some((section) => section.key === 'atoms')) {
+      drop('summary')
+      body = bodyOf()
+    }
+  }
+  if (sections.length === 0) {
+    writeTrace('skip budget chars=0 budget=' + budget + ' q=' + JSON.stringify(question.slice(0, 40)))
+    return ''
   }
 
-  const atoms = await gatedAtoms(slot, userText, INJECT_ATOMS)
-  if (atoms.length > 0) parts.push('【可能相关的事实】' + atoms.map((atom) => text(atom.text).trim().slice(0, 120)).join('；'))
-
-  if (parts.length === 0) return ''
-  return [
-    '【历史记忆 · 仅供参考】',
-    ...parts,
-    '（上面是更早对话留下的记录。只有与本轮消息确实相关时才使用；不相关就整段忽略，按用户这条消息本身回答。）'
-  ].join('\n')
+  const room = Math.max(0, budget - header.length - footer.length - 2)
+  const clipped = body.length > room ? body.slice(0, room) : body
+  if (clipped.trim().length === 0) return ''
+  const block = [header, clipped, footer].join('\n')
+  writeTrace('inject atoms=' + atoms.length + ' chars=' + block.length + ' budget=' + budget + ' q=' + JSON.stringify(question.slice(0, 40)))
+  return block
 }
 
 /** 3.5.3 及以前的注入方式：L3 画像 + L2 场景 + 6 条召回，全部无条件灌进去。 */

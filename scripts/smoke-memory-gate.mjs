@@ -1,23 +1,23 @@
 #!/usr/bin/env node
 /**
- * smoke-memory-gate.mjs — 记忆注入的「相关性门」回归。
+ * smoke-memory-gate.mjs — 「旧记忆不得干扰新会话」的回归。
  *
- * 3.5.3 及以前的 memoryBlock 会把【本会话场景】+ 召回 6 条事实无条件塞进每一轮 prompt。
- * 群里聊完「2.16.0 灰度 / 补 tag / No-Go」之后，用户问「最近AI产品热点」，
- * 模型看到的是 1168 字的旧发布计划 + 8 个字的问题 —— 于是回答发布计划。
+ * 3.5.3 及以前：memoryBlock 把【本会话场景】+ 6 条召回无条件塞进每一轮。
+ * 群里聊完 2.16.0 之后，用户问「最近AI产品热点」，模型收到的是 1168 字旧发布计划
+ * + 8 个字的问题，于是照着记忆回答。
  *
- * 这个用例把「被污染的会话记忆」造出来，断言：
- *   1. 独立提问不注入旧话题（无论有没有向量服务）；
- *   2. 明确追问才注入对应记忆；
- *   3. TW_MEMORY_MODE=off / all 两个开关还在。
+ * 3.5.5 起是两道结构性闸门，不靠提示词措辞：
+ *   1. continuity 硬门：这一轮不是接着上一轮 → 一条记忆都不注入；
+ *   2. 字数硬预算：整块 ≤ max(120, 本句长度×2+40) 且 ≤ 320 字。
+ * 这个用例用「被污染的会话记忆」把这些约束全部钉住。
  */
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 const home = mkdtempSync(join(tmpdir(), 'wb-memory-'))
 process.env.DSH_HOME = home
-// 测试环境不连本机 Ollama：只用关键词兜底，结果可复现。
+// 不连本机 Ollama：只用关键词兜底，结果可复现。
 mkdirSync(join(home, 'team-workbench'), { recursive: true })
 writeFileSync(join(home, 'team-workbench', 'memory-settings.json'), JSON.stringify({ embedding: { enabled: false } }), 'utf8')
 
@@ -37,36 +37,66 @@ const slot = {
   since: 0,
   updatedAt: now
 }
-const persona = {
-  items: [{ id: 'p1', text: '偏好先给结论再给依据' }],
-  updatedAt: now
-}
+const persona = { items: [{ id: 'p1', text: '偏好先给结论再给依据' }], updatedAt: now }
 
 let failures = 0
 const check = (name, ok, detail) => {
   if (!ok) failures += 1
   console.log((ok ? 'PASS  ' : 'FAIL  ') + name + (detail ? '  (' + detail + ')' : ''))
 }
+const budgetOf = (question) => Math.min(320, Math.max(120, question.length * 2 + 40))
 
-const fresh = await memoryBlock(slot, persona, '最近AI产品热点', { followUp: false })
-check('独立提问不注入旧场景摘要', !fresh.includes('2.16.0') && !fresh.includes('灰度'), 'chars=' + fresh.length)
-check('独立提问不注入无关事实', !fresh.includes('补 tag') && !fresh.includes('名册'), 'chars=' + fresh.length)
-check('用户偏好仍然保留', fresh.includes('偏好先给结论'), '')
+// —— 闸门 1：不是接着上一轮 → 一个字都不注入 ——
+const independent = await memoryBlock(slot, persona, '最近AI产品热点', { followUp: false, continuity: false })
+check('新会话第一句不注入任何旧记忆', independent === '', JSON.stringify(independent))
 
-const other = await memoryBlock(slot, persona, '帮我改一下聊天窗口的字体', { followUp: false })
-check('换一个无关问题同样干净', !other.includes('2.16.0') && !other.includes('灰度'), 'chars=' + other.length)
+const sweep = [
+  '最近AI产品热点',
+  '帮我把界面字体调大点',
+  '你好',
+  '今天几号',
+  '给我讲讲 RAG 的召回原理',
+  '这个季度的行业趋势有哪些',
+  '把面板宽度改成 420',
+  '列一下 DSH 的插件槽位',
+  '写个 Python 快速排序',
+  '解释一下 BM25',
+  '明天天气怎么样',
+  '推荐几本设计书'
+]
+const leaked = []
+for (const question of sweep) {
+  const block = await memoryBlock(slot, persona, question, { followUp: false, continuity: false })
+  if (block !== '') leaked.push(question + '→' + block.length)
+}
+check('无关问题扫一遍，旧记忆零泄漏', leaked.length === 0, leaked.join(' | '))
 
-const follow = await memoryBlock(slot, persona, '那个 tag 什么时候补', { followUp: true })
+const markerButNew = await memoryBlock(slot, persona, '那个字体怎么调大', { followUp: true, continuity: true })
+check('有追问词但和旧话题无关时也不注入', !markerButNew.includes('2.16.0') && !markerButNew.includes('灰度'), JSON.stringify(markerButNew.slice(0, 60)))
+
+// —— 闸门 2：明确追问才出场，且字数被硬预算卡住 ——
+const follow = await memoryBlock(slot, persona, '那个 tag 什么时候补', { followUp: true, continuity: true })
 check('追问能召回相关记忆', follow.includes('2.16.0'), 'chars=' + follow.length)
+check('追问的记忆不超硬预算', follow.length <= budgetOf('那个 tag 什么时候补'), follow.length + '/' + budgetOf('那个 tag 什么时候补'))
 
+const shortQuestion = '2.16.0 能发吗'
+const shortFollow = await memoryBlock(slot, persona, shortQuestion, { followUp: false, continuity: true })
+check('短问题的记忆被预算压住（不会反客为主）', shortFollow.length <= budgetOf(shortQuestion), shortFollow.length + '/' + budgetOf(shortQuestion))
+
+const longQuestion = '把 2.16.0 的发布判据、回滚条件、以及 11-12 那天的具体时间点按顺序列给我，并标注哪些是已确认、哪些还待裁决'
+const longFollow = await memoryBlock(slot, persona, longQuestion, { followUp: false, continuity: true })
+check('长问题可以有更多记忆，但仍有上限', longFollow.length <= budgetOf(longQuestion) && longFollow.length <= 320, longFollow.length + '/' + budgetOf(longQuestion))
+
+// —— 开关与空槽 ——
 const legacy = await memoryBlock(slot, persona, '最近AI产品热点', { mode: 'all' })
 check('TW_MEMORY_MODE=all 仍是旧的全量注入（排障用）', legacy.includes('2.16.0'), 'chars=' + legacy.length)
 
 const off = await memoryBlock(slot, persona, '那个 tag 什么时候补', { mode: 'off' })
 check('TW_MEMORY_MODE=off 完全不注入', off === '', JSON.stringify(off.slice(0, 40)))
 
-const empty = await memoryBlock({ l2: { summary: '', at: '' }, atoms: [], since: 0, updatedAt: '' }, { items: [] }, '随便问问', {})
+const emptySlot = { l2: { summary: '', at: '' }, atoms: [], since: 0, updatedAt: '' }
+const empty = await memoryBlock(emptySlot, { items: [] }, '随便问问', { continuity: true })
 check('没有记忆时返回空串', empty === '', JSON.stringify(empty))
 
-console.log(failures === 0 ? '\n记忆门禁回归全部通过' : '\n失败 ' + failures + ' 项')
+console.log(failures === 0 ? '\n记忆门禁回归全部通过（旧记忆不可能污染新会话）' : '\n失败 ' + failures + ' 项')
 process.exit(failures === 0 ? 0 : 1)

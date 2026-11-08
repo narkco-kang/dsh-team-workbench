@@ -44,6 +44,7 @@ import {
   saveMemory,
   saveSettings,
   searchMemoryHybrid,
+  sharesTerms,
   slotOf
 } from './memory.js'
 import { loadSttSettings, probeStt, providerPresets, saveSttSettings, selftest, transcribe } from './stt.js'
@@ -336,6 +337,25 @@ export function stripReceipts(value) {
  */
 const FOLLOW_UP = /(继续|接着|然后|再|展开|详细|具体|刚才|上面|刚刚|前面|这个|那个|它|他们|为什么|怎么|如何|补充|总结|结论|看看|说明|讲讲)/u
 
+/**
+ * 旧记忆出场的唯一条件：这一轮确实在接着上一轮说话。
+ *   1. 有追问词（继续/刚才/那个…），或
+ *   2. 与本轮之前最后一条公开回复共享 ≥2 个词元（如「2.16.0 现在能发吗」）。
+ * 都不满足 → 一条记忆都不注入，旧话题的相似度再高也进不来。
+ */
+function memoryContinuity(messages, userText) {
+  const question = String(userText === undefined || userText === null ? '' : userText)
+  if (FOLLOW_UP.test(question)) return true
+  const history = Array.isArray(messages) ? messages : []
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index]
+    if (message === undefined || message === null) continue
+    if (message.role !== 'agent' || message.hidden === true) continue
+    return sharesTerms(question, message.text) >= 2
+  }
+  return false
+}
+
 function backgroundLines(messages, userText) {
   const q = text(userText).trim()
   if (q.length === 0 || !FOLLOW_UP.test(q)) return ['（本轮是独立提问：忽略更早的对话，只回答本条）', '']
@@ -554,7 +574,10 @@ export async function sendPrivate(ctx, parent, member, userText, signal, options
   await saveChats(chats)
   const memory = await loadMemory()
   const slot = slotOf(memory, 'private', member.id)
-  const memoryText = await memoryBlock(slot, memory.persona, userText, { followUp: FOLLOW_UP.test(String(userText)) })
+  const memoryText = await memoryBlock(slot, memory.persona, userText, {
+    followUp: FOLLOW_UP.test(String(userText)),
+    continuity: memoryContinuity(thread.messages.slice(0, -1), userText)
+  })
   const liveOptions = {
     ...(options !== undefined ? options : {}),
     onSubStep: async (subStep) => {
@@ -702,7 +725,10 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
   }
 
   const runTurn = async (member, depth, lastSpeaker) => {
-    const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText, { followUp: FOLLOW_UP.test(String(userText)) })
+    const memoryText = await memoryBlock(slotOf(memory, 'room', target.id), memory.persona, userText, {
+      followUp: FOLLOW_UP.test(String(userText)),
+      continuity: memoryContinuity(target.messages.slice(0, -1), userText)
+    })
     // DS-Bot：每个成员只看「上次看过之后」的新消息，不重复灌整段历史。
     target.seen = target.seen !== null && typeof target.seen === 'object' ? target.seen : {}
     const since = target.seen[member.id]
