@@ -387,7 +387,8 @@ export function adminPrompt(room, members, messages, userText, memoryText) {
     memoryText.length > 0 ? memoryText : null,
     '',
     '最近的群聊记录（只是背景）：',
-    transcript(messages.slice(-12), '成员'),
+    // 只喂公开记录：内部成员长篇回答（hidden）会把模型拽回旧话题。
+    transcript(messages.filter((message) => message.hidden !== true).slice(-12), '成员'),
     '',
     '用户的新消息：',
     userText,
@@ -407,7 +408,8 @@ export function memberPrompt(room, member, members, messages, userText, asker, m
     memoryText.length > 0 ? memoryText : null,
     '',
     '最近的群聊记录（只是背景）：',
-    transcript(messages.slice(-12), '成员'),
+    // 只喂公开记录：内部成员长篇回答（hidden）会把模型拽回旧话题。
+    transcript(messages.filter((message) => message.hidden !== true).slice(-12), '成员'),
     '',
     (asker ? asker + ' @ 了你。' : '用户 @ 了你。') + '本轮消息：',
     userText,
@@ -768,8 +770,12 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
         } else {
           // 超过 grace：本轮不阻塞，完成时 runTurn 自己会把回复写进群里。
           target.progress.background = (Array.isArray(target.progress.background) ? target.progress.background : []).concat(member.name)
-          running.then(async () => {
+          running.then(async (value) => {
             target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
+            // 慢成员的回复是 hidden 的：不补一次汇总，用户就永远看不到它。
+            if (value !== undefined && value !== null && value.message !== null && value.message !== undefined) {
+              await summarizePending()
+            }
             await persist()
           }, async () => {
             target.progress.background = (target.progress.background || []).filter((name) => name !== member.name)
@@ -811,14 +817,38 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
     depth += 1
   }
   // 主管汇总：成员的回答只作为内部依据，对外只留一条主管的结论。
+  // 慢成员会在 grace（15s）之后才完成，所以汇总必须可重入：后台完成时再跑一次；
+  // 串行链保证同一时刻只有一个汇总在跑，covered 标记保证同一条内部回复不会被汇总两次。
   const chief = admin !== undefined && admin !== null ? admin : (alive[0] || null)
-  if (turns.length > 0 && chief !== null) {
-    const speakers = [...new Set(turns.map((turn) => turn.memberId))]
-    if (speakers.length === 1) {
-      // 只有一个人说话（例如用户直接 @ 某人）：他的回答本身就是结论，直接公开。
-      const own = target.messages.find((message) => message.id === turns[0].messageId)
-      if (own !== undefined) delete own.hidden
-    } else if (target.synthesize !== false) {
+  let summaryChain = Promise.resolve()
+  const pendingHidden = () => {
+    let lastVisible = -1
+    for (let i = target.messages.length - 1; i >= 0; i -= 1) {
+      const message = target.messages[i]
+      if (message.role === 'agent' && message.hidden !== true) { lastVisible = i; break }
+    }
+    return target.messages
+      .slice(lastVisible + 1)
+      .filter((message) => message.role === 'agent' && message.hidden === true && message.covered !== true)
+  }
+  const summarizePending = () => {
+    const run = summaryChain.then(async () => {
+      if (chief === null) return
+      const pending = pendingHidden()
+      if (pending.length === 0) return
+      const speakers = [...new Set(pending.map((message) => message.memberId))]
+      if (target.synthesize === false) {
+        for (const message of pending) { message.covered = true; delete message.hidden }
+        await persist()
+        return
+      }
+      if (speakers.length === 1 && pending.length === 1) {
+        // 只有一个人说话（例如用户直接 @ 某人）：他的回答本身就是结论，直接公开。
+        pending[0].covered = true
+        delete pending[0].hidden
+        await persist()
+        return
+      }
       try {
         const summaryPrompt = [
           '【群聊 · ' + target.name + '】',
@@ -829,27 +859,39 @@ export async function sendGroup(ctx, parent, room, members, userText, signal, op
           userText,
           '',
           '各成员的回答：',
-          turns.map((turn) => turn.name + '：' + turn.text).join('\n\n'),
+          pending.map((message) => message.name + '：' + message.text).join('\n\n'),
           '',
           '请以管理员身份给用户一条汇总回复：先给结论，再列 2-5 条要点（谁负责什么），不要复述过程，不要 @ 任何人，不要用「成员 A 说了」这种转述。'
         ].join('\n')
         const raw = await runMember(ctx, parent, chief, summaryPrompt, signal, { synthesize: false })
         const summary = stripReceipts(raw.text)
         if (summary.trim().length === 0) throw new Error('empty summary')
+        for (const message of pending) message.covered = true
         pushMessage(target.messages, messageOf('agent', chief, summary, { stopReason: raw.stopReason }))
         target.progress.steps.push({ name: chief.name + '（汇总）', startedAt: new Date().toISOString(), phase: 'done', ms: 0, emoji: chief.emoji, summary: '已汇总' })
+        await persist()
       } catch (error) {
-        // 汇总失败就放出管理员自己的那条，至少用户能看到一条回复。
-        const fallbackId = turns[0] !== undefined ? turns[0].messageId : ''
-        const fallback = target.messages.find((message) => message.id === fallbackId)
-        if (fallback !== undefined) delete fallback.hidden
+        // 汇总失败：至少放出最后一条，别让用户什么都看不到。
+        const last = pending[pending.length - 1]
+        last.covered = true
+        delete last.hidden
+        await persist()
       }
-    } else {
-      for (const turn of turns) {
-        const own = target.messages.find((message) => message.id === turn.messageId)
-        if (own !== undefined) delete own.hidden
+    })
+    summaryChain = run.catch(() => undefined)
+    return run
+  }
+  if (chief !== null) {
+    // 等一会儿正在后台跑的成员：他们多半在几秒内完成，等到了就只汇总一次；
+    // 等不到（模型卡住）也要先给用户一条结论，剩下的由后台回调补汇总。
+    const waitBackground = async (limitMs) => {
+      const deadline = Date.now() + limitMs
+      while ((Array.isArray(target.progress.background) ? target.progress.background : []).length > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 80))
       }
     }
+    await waitBackground(6000)
+    await summarizePending()
   }
   target.progress.current = ''
   target.progress.finishedAt = new Date().toISOString()
