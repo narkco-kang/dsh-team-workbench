@@ -119,7 +119,7 @@ function ensureChiefRoom(chats, store) {
 }
 
 const CHAT_VERSION = 1
-const MAX_MESSAGES = 200
+const MAX_MESSAGES = 600
 const HISTORY_WINDOW = 12
 // DS-Bot 的全员轮流模式一条消息要让每个成员都说一次，所以上限放宽到 12。
 const MAX_TURNS_PER_MESSAGE = 12
@@ -262,6 +262,34 @@ function messageOf(role, member, body, extra) {
     text: typeof body === 'string' ? body : '',
     time: new Date().toISOString(),
     ...(extra !== undefined ? extra : {})
+  }
+}
+
+/**
+ * 翻页取消息。
+ * - 不给 limit：整段返回（保持旧行为）。
+ * - 给 limit：取最后 limit 条，并给出 hasMore / oldestId 供「加载更早」用。
+ * - 给 before=<messageId>：取该条之前的 limit 条（更早的历史）。
+ */
+function pageMessages(list, params) {
+  const all = Array.isArray(list) ? list : []
+  const limitRaw = Number(params.get('limit') || 0)
+  const before = text(params.get('before'))
+  const limit = Number.isSafeInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 300) : 0
+  if (limit === 0) return { messages: all, hasMore: false, oldestId: '' }
+  let slice = all
+  let offset = all.length
+  if (before.length > 0) {
+    const index = all.findIndex((entry) => text(entry?.id) === before)
+    offset = index >= 0 ? index : 0
+    slice = all.slice(0, offset)
+  }
+  const start = Math.max(0, slice.length - limit)
+  const messages = slice.slice(start)
+  return {
+    messages,
+    hasMore: start > 0,
+    oldestId: messages.length > 0 ? text(messages[0]?.id) : ''
   }
 }
 
@@ -1352,7 +1380,8 @@ export function apply(ctx) {
         const thread = chats.private[id]
         // 轻量轮询：只回过程化状态，不带整段消息。
         if (url.searchParams.get('progress') === '1') return json({ ok: true, progress: (thread && thread.progress) || null })
-        return json({ ok: true, member, messages: thread && Array.isArray(thread.messages) ? thread.messages : [] })
+        const page = pageMessages(thread && thread.messages, url.searchParams)
+        return json({ ok: true, member, messages: page.messages, hasMore: page.hasMore, oldestId: page.oldestId })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }
@@ -1372,7 +1401,8 @@ export function apply(ctx) {
         const room = chats.rooms.find((entry) => entry.id === id)
         if (room === undefined) return json({ ok: false, error: '找不到该群聊' }, 404)
         if (url.searchParams.get('progress') === '1') return json({ ok: true, progress: room.progress || null })
-        return json({ ok: true, room, messages: Array.isArray(room.messages) ? room.messages : [] })
+        const page = pageMessages(room.messages, url.searchParams)
+        return json({ ok: true, room, messages: page.messages, hasMore: page.hasMore, oldestId: page.oldestId })
       } catch (error) {
         return json({ ok: false, error: String(error) }, 500)
       }
