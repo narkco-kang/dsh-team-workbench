@@ -63,6 +63,8 @@ const ctx = {
   logger: { info() {}, warn() {} }
 }
 
+const { publicText } = await import('../dsh/chat.js')
+
 const mod = await import('../dsh/index.js')
 mod.apply(ctx, {})
 
@@ -112,6 +114,9 @@ check('成员回答仍作为内部记录保留', group.messages.filter((m) => m.
 check('被 @ 的成员确实收到了任务', prompts.some((p) => p.includes('@ 了你') && p.includes('两天')), '')
 
 check('群聊对外文本不含 @ 指令', groupVisible.every((m) => !String(m.text).includes('@')), groupVisible.map((m) => String(m.text).slice(0, 24)).join(' | '))
+check('清洗删掉 @同事 指令行', publicText('结论：两天。\n@前端开发者 你评估一下。', [{ name: '前端开发者' }]) === '结论：两天。', publicText('结论：两天。\n@前端开发者 你评估一下。', [{ name: '前端开发者' }]))
+check('清洗把行内 @ 换成名字', publicText('让 @前端开发者 看下', [{ name: '前端开发者' }]) === '让 前端开发者 看下', publicText('让 @前端开发者 看下', [{ name: '前端开发者' }]))
+check('清洗不会吃掉邮箱', publicText('发到 user@example.com', [{ name: '前端开发者' }]) === '发到 user@example.com', publicText('发到 user@example.com', [{ name: '前端开发者' }]))
 
 // 接力：成员之间的讨论留在内部记录/状态条，对外只发一条汇总，且不带 @ 指令。
 relayMentionTo = architect.name

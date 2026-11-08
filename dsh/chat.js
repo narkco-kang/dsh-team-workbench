@@ -349,8 +349,8 @@ export function publicText(value, members) {
       .join('\n')
     out = out.replace(new RegExp('@' + escaped, 'g'), name)
   }
-  // 剩下不认识的 @xxx 也一并去掉，用户不需要看见这种标记。
-  out = out.replace(/@[^\s，,。；;：:]{1,20}/gu, '')
+  // 只清理「行首的 @点名」这种残留；行内的 @ 可能是邮箱或代码，不能乱删。
+  out = out.replace(/^[ \t]*@[\u4e00-\u9fa5A-Za-z0-9·]{1,12}[ \t]*/gmu, '')
   return out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
 }
 
